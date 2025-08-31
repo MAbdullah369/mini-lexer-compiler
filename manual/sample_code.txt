@@ -1,5 +1,3 @@
-fn main() {
-    int age = 21;
-    string name = "Abdullah";
-    return age;
+fn if() {
+   int a = 2 @ 5;
 }

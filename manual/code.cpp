@@ -1,8 +1,7 @@
 #include <iostream>
 #include <fstream>
-#include <sstream>
+#include <string>
 #include <vector>
-#include <cctype>
 using namespace std;
 
 struct Token {
@@ -10,91 +9,98 @@ struct Token {
     string value;
 };
 
-bool isKeyword(const string &word) {
-    string keywords[] = {"int", "return", "if", "else", "while", "for", "float", "string"};
-    for (string kw : keywords) {
-        if (word == kw) return true;
-    }
-    return false;
-}
-
 vector<Token> tokenize(const string &code) {
     vector<Token> tokens;
-    string current = "";
-    enum State { START, IN_ID, IN_NUM, IN_STRING } state = START;
+    int i = 0;
 
-    for (size_t i = 0; i < code.size(); i++) {
+    while (i < (int)code.size()) {
         char c = code[i];
 
-        switch (state) {
-            case START:
-                if (isspace(c)) {
-                    continue;
-                }
-                else if (isalpha(c) || c == '_') {
-                    current = c;
-                    state = IN_ID;
-                }
-                else if (isdigit(c)) {
-                    current = c;
-                    state = IN_NUM;
-                }
-                else if (c == '"') {
-                    current = "\"";
-                    state = IN_STRING;
-                }
-                else {
-                    string sym(1, c);
-                    tokens.push_back({"SYMBOL", sym});
-                }
-                break;
-
-            case IN_ID:
-                if (isalnum(c) || c == '_') {
-                    current += c;
-                } else {
-                    if (isKeyword(current))
-                        tokens.push_back({"KEYWORD", current});
-                    else
-                        tokens.push_back({"IDENTIFIER", current});
-                    current = "";
-                    state = START;
-                    i--; // reprocess this char
-                }
-                break;
-
-            case IN_NUM:
-                if (isdigit(c)) {
-                    current += c;
-                } else {
-                    tokens.push_back({"NUMBER", current});
-                    current = "";
-                    state = START;
-                    i--; // reprocess
-                }
-                break;
-
-            case IN_STRING:
-                current += c;
-                if (c == '"') {
-                    tokens.push_back({"STRING", current});
-                    current = "";
-                    state = START;
-                }
-                break;
+        // Skip whitespace
+        if (isspace(c)) {
+            i++;
+            continue;
         }
-    }
 
-    // Flush remaining
-    if (!current.empty()) {
-        if (state == IN_ID) {
-            if (isKeyword(current))
-                tokens.push_back({"KEYWORD", current});
-            else
-                tokens.push_back({"IDENTIFIER", current});
-        } else if (state == IN_NUM) {
-            tokens.push_back({"NUMBER", current});
+        // Keywords or identifiers
+        if (isalpha(c) || c == '_') {
+            string word;
+            while (i < (int)code.size() && (isalnum(code[i]) || code[i] == '_')) {
+                word += code[i++];
+            }
+            if (word == "fn" || word == "int" || word == "string" || word == "float" ||
+                word == "bool" || word == "return" || word == "if" || word == "else" ||
+                word == "for" || word == "while" || word == "main") {
+                tokens.push_back({"KEYWORD", word});
+            } else {
+                tokens.push_back({"IDENTIFIER", word});
+            }
+            continue;
         }
+
+        // Numbers (with invalid identifier check)
+        if (isdigit(c)) {
+            string num;
+            while (i < (int)code.size() && isdigit(code[i])) {
+                num += code[i++];
+            }
+            // If a digit is followed by a letter/underscore → invalid identifier
+            if (i < (int)code.size() && (isalpha(code[i]) || code[i] == '_')) {
+                string invalid = num;
+                while (i < (int)code.size() && (isalnum(code[i]) || code[i] == '_')) {
+                    invalid += code[i++];
+                }
+                cerr << "Lexical Error: Invalid identifier '" << invalid << "'\n";
+                continue;
+            }
+            tokens.push_back({"NUMBER", num});
+            continue;
+        }
+
+        // Strings
+        if (c == '"') {
+            string str;
+            str += c;
+            i++;
+            while (i < (int)code.size() && code[i] != '"') {
+                str += code[i++];
+            }
+            if (i < (int)code.size()) {
+                str += code[i++]; // closing quote
+                tokens.push_back({"STRING", str});
+            } else {
+                cerr << "Lexical Error: Unterminated string literal\n";
+            }
+            continue;
+        }
+
+        // Operators
+        if (c == '=' || c == '!' || c == '<' || c == '>' ||
+            c == '+' || c == '-' || c == '*' || c == '/' ||
+            c == '&' || c == '|') {
+            string op;
+            op += c;
+            i++;
+            if ((c == '=' || c == '!' || c == '<' || c == '>') && i < (int)code.size() && code[i] == '=') {
+                op += code[i++];
+            } else if ((c == '&' || c == '|') && i < (int)code.size() && code[i] == c) {
+                op += code[i++];
+            }
+            tokens.push_back({"OPERATOR", op});
+            continue;
+        }
+
+        // Symbols
+        if (c == '(' || c == ')' || c == '{' || c == '}' || c == ';' || c == ',') {
+            string sym(1, c);
+            tokens.push_back({"SYMBOL", sym});
+            i++;
+            continue;
+        }
+
+        // Invalid character
+        cerr << "Lexical Error: Invalid token '" << c << "'\n";
+        i++;
     }
 
     return tokens;
@@ -103,19 +109,16 @@ vector<Token> tokenize(const string &code) {
 int main() {
     ifstream infile("sample_code.txt");
     if (!infile) {
-        cerr << "Error: Could not open sample_code.txt\n";
+        cerr << "Error: input.txt not found!\n";
         return 1;
     }
 
-    stringstream buffer;
-    buffer << infile.rdbuf();
-    string code = buffer.str();
-
+    string code((istreambuf_iterator<char>(infile)), istreambuf_iterator<char>());
     vector<Token> tokens = tokenize(code);
 
     cout << "Tokens:\n";
-    for (auto &tok : tokens) {
-        cout << "<" << tok.type << ", " << tok.value << ">\n";
+    for (auto &t : tokens) {
+        cout << "<" << t.type << ", " << t.value << ">\n";
     }
 
     return 0;
