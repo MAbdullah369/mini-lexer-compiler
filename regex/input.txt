@@ -1,5 +1,0 @@
-int f1() {
-    int 25age = 21;
-    string name = "Abdullah";
-    return age;
-}
