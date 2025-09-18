@@ -94,7 +94,7 @@ public:
             Token token = nextToken();
             if (token.type != TokenType::T_UNKNOWN) {
                 tokens.push_back(token);
-                if (token.type == TokenType::T_QUOTES && stringLiteralTokens.size() > 0) {
+                if (token.type == TokenType::T_QUOTES && !stringLiteralTokens.empty()) {
                     for (const auto& strToken : stringLiteralTokens) {
                         tokens.push_back(strToken);
                     }
@@ -117,7 +117,7 @@ private:
     int col = 1;
 
     regex whitespacePattern, lineCommentPattern, blockCommentPattern,
-          floatPattern, intPattern, identifierPattern, stringPattern,
+          floatPattern, badFloat1, badFloat2, intPattern, identifierPattern, stringPattern,
           twoCharOpPattern;
 
     unordered_map<string, TokenType> keywords;
@@ -128,6 +128,8 @@ private:
         lineCommentPattern = regex(R"(^//([^\r\n]*))");
         blockCommentPattern = regex(R"(^/\*([\s\S]*?)\*/)", regex_constants::ECMAScript);
         floatPattern = regex(R"(^(\d+\.\d+))");
+        badFloat1 = regex(R"(^(\d+\.(?!\d)))");   // 23.
+        badFloat2 = regex(R"(^(\.\d+))");         // .45
         intPattern = regex(R"(^(\d+))");
         identifierPattern = regex(R"(^([a-zA-Z_][a-zA-Z0-9_]*))");
         stringPattern = regex(R"(^"((?:[^"\\]|\\.)*)\")", regex_constants::ECMAScript);
@@ -157,22 +159,21 @@ private:
     }
 
     Token makeToken(TokenType type, const string &lex = "") {
-        Token t{type, lex, line, col};
-        return t;
+        return {type, lex, line, col};
     }
 
     string processEscapeSequences(const string& str) {
         string result;
         for (size_t i = 0; i < str.length(); i++) {
             if (str[i] == '\\' && i + 1 < str.length()) {
-                switch (str[i + 1]) {
-                    case 'n': result += '\n'; i++; break;
-                    case 't': result += '\t'; i++; break;
-                    case 'r': result += '\r'; i++; break;
-                    case '\\': result += '\\'; i++; break;
-                    case '"': result += '"'; i++; break;
-                    case '0': result += '\0'; i++; break;
-                    default: result += str[i]; break;
+                char esc = str[i + 1];
+                switch (esc) {
+                    case 'n': case 't': case 'r': case '\\': case '"': case '0':
+                        i++; // skip escape
+                        break;
+                    default:
+                        throw runtime_error("Invalid escape sequence \\" + string(1, esc) +
+                                            " at line " + to_string(line));
                 }
             } else result += str[i];
         }
@@ -185,24 +186,25 @@ private:
         smatch match;
         int startCol = col;
 
+        // --- block comment ---
         if (regex_search(remaining, match, blockCommentPattern) && match.position() == 0) {
             string content = match.str(1);
             pos += match.length();
             for (char c : match.str()) { if (c == '\n') { line++; col = 1; } else col++; }
             return makeToken(TokenType::T_BLOCKCOMMENT, content);
         }
-
         if (remaining.substr(0, 2) == "/*" && remaining.find("*/") == string::npos) {
             throw runtime_error("Unterminated block comment (line " + to_string(line) + ")");
         }
 
+        // --- line comment ---
         if (regex_search(remaining, match, lineCommentPattern) && match.position() == 0) {
             string content = match.str(1);
-            pos += match.length();
-            col += match.length();
+            pos += match.length(); col += match.length();
             return makeToken(TokenType::T_LINECOMMENT, content);
         }
 
+        // --- string literal ---
         if (regex_search(remaining, match, stringPattern) && match.position() == 0) {
             string content = match.str(1);
             Token leftQuote = makeToken(TokenType::T_QUOTES, "\"");
@@ -215,33 +217,35 @@ private:
             stringLiteralTokens.push_back(rightQuote);
             return leftQuote;
         }
-
         if (remaining[0] == '"') {
             throw runtime_error("Unterminated string literal (line " + to_string(line) + ")");
         }
 
+        // --- floats ---
+        if (regex_search(remaining, match, badFloat1) && match.position() == 0) {
+            throw runtime_error("Invalid float literal: missing digits after '.' at line " + to_string(line));
+        }
+        if (regex_search(remaining, match, badFloat2) && match.position() == 0) {
+            throw runtime_error("Invalid float literal: missing digits before '.' at line " + to_string(line));
+        }
         if (regex_search(remaining, match, floatPattern) && match.position() == 0) {
             string value = match.str(1);
-            size_t nextPos = pos + match.length();
-            if (nextPos < source.length() && (isalpha(source[nextPos]) || source[nextPos] == '_')) {
-                throw runtime_error("Lex error (line " + to_string(line) + ", col " +
-                                    to_string(startCol) + "): invalid identifier starting with digit");
-            }
             pos += match.length(); col += match.length();
             return makeToken(TokenType::T_FLOATLIT, value);
         }
 
+        // --- int ---
         if (regex_search(remaining, match, intPattern) && match.position() == 0) {
             string value = match.str(1);
             size_t nextPos = pos + match.length();
             if (nextPos < source.length() && (isalpha(source[nextPos]) || source[nextPos] == '_')) {
-                throw runtime_error("Lex error (line " + to_string(line) + ", col " +
-                                    to_string(startCol) + "): invalid identifier starting with digit");
+                throw runtime_error("Invalid identifier starting with digit at line " + to_string(line));
             }
             pos += match.length(); col += match.length();
             return makeToken(TokenType::T_INTLIT, value);
         }
 
+        // --- identifier / keyword ---
         if (regex_search(remaining, match, identifierPattern) && match.position() == 0) {
             string value = match.str(1);
             pos += match.length(); col += match.length();
@@ -250,42 +254,41 @@ private:
             return makeToken(type, value);
         }
 
+        // --- two-char operators ---
         if (regex_search(remaining, match, twoCharOpPattern) && match.position() == 0) {
             string op = match.str(1);
             pos += 2; col += 2;
-            TokenType type = TokenType::T_UNKNOWN;
-            if (op == "==") type = TokenType::T_EQUALSOP;
-            else if (op == "!=") type = TokenType::T_NOTEQUAL;
-            else if (op == "<=") type = TokenType::T_LESSEQ;
-            else if (op == ">=") type = TokenType::T_GREATEREQ;
-            else if (op == "&&") type = TokenType::T_AND;
-            else if (op == "||") type = TokenType::T_OR;
-            return makeToken(type, op);
+            if (op == "==") return makeToken(TokenType::T_EQUALSOP, op);
+            if (op == "!=") return makeToken(TokenType::T_NOTEQUAL, op);
+            if (op == "<=") return makeToken(TokenType::T_LESSEQ, op);
+            if (op == ">=") return makeToken(TokenType::T_GREATEREQ, op);
+            if (op == "&&") return makeToken(TokenType::T_AND, op);
+            if (op == "||") return makeToken(TokenType::T_OR, op);
         }
 
+        // --- single-char tokens ---
         char c = remaining[0];
         pos++; col++;
-        TokenType type = TokenType::T_UNKNOWN;
         switch (c) {
-            case '=': type = TokenType::T_ASSIGNOP; break;
-            case '<': type = TokenType::T_LESS; break;
-            case '>': type = TokenType::T_GREATER; break;
-            case '!': type = TokenType::T_NOT; break;
-            case '+': type = TokenType::T_PLUS; break;
-            case '-': type = TokenType::T_MINUS; break;
-            case '*': type = TokenType::T_MULTIPLY; break;
-            case '/': type = TokenType::T_DIVIDE; break;
-            case '(': type = TokenType::T_PARENL; break;
-            case ')': type = TokenType::T_PARENR; break;
-            case '{': type = TokenType::T_BRACEL; break;
-            case '}': type = TokenType::T_BRACER; break;
-            case '[': type = TokenType::T_BRACKETL; break;
-            case ']': type = TokenType::T_BRACKETR; break;
-            case ',': type = TokenType::T_COMMA; break;
-            case ';': type = TokenType::T_SEMICOLON; break;
-            case '"': type = TokenType::T_QUOTES; break;
+            case '=': return makeToken(TokenType::T_ASSIGNOP, "=");
+            case '<': return makeToken(TokenType::T_LESS, "<");
+            case '>': return makeToken(TokenType::T_GREATER, ">");
+            case '!': return makeToken(TokenType::T_NOT, "!");
+            case '+': return makeToken(TokenType::T_PLUS, "+");
+            case '-': return makeToken(TokenType::T_MINUS, "-");
+            case '*': return makeToken(TokenType::T_MULTIPLY, "*");
+            case '/': return makeToken(TokenType::T_DIVIDE, "/");
+            case '(': return makeToken(TokenType::T_PARENL, "(");
+            case ')': return makeToken(TokenType::T_PARENR, ")");
+            case '{': return makeToken(TokenType::T_BRACEL, "{");
+            case '}': return makeToken(TokenType::T_BRACER, "}");
+            case '[': return makeToken(TokenType::T_BRACKETL, "[");
+            case ']': return makeToken(TokenType::T_BRACKETR, "]");
+            case ',': return makeToken(TokenType::T_COMMA, ",");
+            case ';': return makeToken(TokenType::T_SEMICOLON, ";");
+            case '"': return makeToken(TokenType::T_QUOTES, "\"");
         }
-        return makeToken(type, string(1, c));
+        return makeToken(TokenType::T_UNKNOWN, string(1, c));
     }
 };
 
@@ -297,7 +300,10 @@ fn int my_fn(int x, float y) {
     /*
        This is a block comment
     */
-    string s = "Hello, World!\n";
+    string s = "Abdullah\nZahid";
+    float a = 23.45;
+    float b = 23.5;   // invalid
+    2.45 // invalid
     if (x >= 10 && y < 20.5) {
         return x + 1;
     } else {

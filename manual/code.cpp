@@ -160,9 +160,9 @@ private:
     void skipWhitespaceOnly() {
         while (true) {
             char c = peek();
-            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') { 
-                advance(); 
-                continue; 
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+                advance();
+                continue;
             }
             break;
         }
@@ -172,11 +172,11 @@ private:
     static bool isIdentPart(unsigned char c) { return isalnum(c) || c == '_'; }
 
     Token makeToken(TokenType type, const string &lex = "", int startCol = -1) const {
-        Token t; 
-        t.type = type; 
-        t.lexeme = lex; 
-        t.line = line; 
-        t.col = (startCol == -1 ? col : startCol); 
+        Token t;
+        t.type = type;
+        t.lexeme = lex;
+        t.line = line;
+        t.col = (startCol == -1 ? col : startCol);
         return t;
     }
 
@@ -193,61 +193,67 @@ private:
         int startCol = col;
         string digits;
         bool isFloat = false;
+
         while (isdigit((unsigned char)peek())) digits.push_back(advance());
-        if (peek() == '.' && isdigit((unsigned char)peekNext())) {
-            isFloat = true;
+
+        if (peek() == '.') {
             digits.push_back(advance());
+            if (!isdigit((unsigned char)peek())) {
+                throw runtime_error("Lex error (line " + to_string(line) +
+                    ", col " + to_string(startCol) + "): invalid float literal '" + digits + "'");
+            }
+            isFloat = true;
             while (isdigit((unsigned char)peek())) digits.push_back(advance());
         }
+
         if (isIdentStart((unsigned char)peek())) {
             string tail;
             while (isIdentPart((unsigned char)peek())) tail.push_back(advance());
-            throw runtime_error("Lex error (line " + to_string(line) + ", col " + to_string(startCol) + "): invalid identifier starting with digit: '" + digits + tail + "'");
+            throw runtime_error("Lex error (line " + to_string(line) +
+                ", col " + to_string(startCol) + "): invalid identifier starting with digit: '" + digits + tail + "'");
         }
-        if (isFloat) {
-            return makeToken(TokenType::T_FLOATLIT, digits, startCol);
-        } else {
-            return makeToken(TokenType::T_INTLIT, digits, startCol);
-        }
+
+        return makeToken(isFloat ? TokenType::T_FLOATLIT : TokenType::T_INTLIT, digits, startCol);
     }
 
     void scanStringLiteral_emitting_quotes() {
-        int startCol = col;
-        advance();
-        Token leftQuotes = makeToken(TokenType::T_QUOTES, "\"", startCol);
-        pendingTokens.push_back(leftQuotes);
+    int startCol = col;
+    advance(); // consume opening quote
+    pendingTokens.push_back(makeToken(TokenType::T_QUOTES, "\"", startCol));
 
-        string content;
-        while (true) {
-            char c = peek();
-            if (c == '\0') throw runtime_error("Unterminated string literal (line " + to_string(line) + ")");
-            if (c == '"') break;
-            if (c == '\\') {
-                advance();
-                char esc = peek();
-                if (esc == '\0') throw runtime_error("Invalid escape at end of file (line " + to_string(line) + ")");
-                switch (esc) {
-                    case 'n': content.push_back('\n'); advance(); break;
-                    case 't': content.push_back('\t'); advance(); break;
-                    case 'r': content.push_back('\r'); advance(); break;
-                    case '\\': content.push_back('\\'); advance(); break;
-                    case '"': content.push_back('"'); advance(); break;
-                    case '0': content.push_back('\0'); advance(); break;
-                    default: content.push_back('\\'); content.push_back(advance()); break;
-                }
-            } else {
-                content.push_back(advance());
+    string cleanValue;
+    while (true) {
+        char c = peek();
+        if (c == '\0')
+            throw runtime_error("Unterminated string literal (line " + to_string(line) + ")");
+        if (c == '"') break;
+
+        if (c == '\\') {
+            advance(); // consume '\'
+            char esc = advance(); // consume the escape character
+            switch (esc) {
+                case 'n': case 't': case 'r':
+                case '\\': case '"': case '0':
+                    // ✅ valid escape recognized
+                    // but don't add anything to cleanValue
+                    break;
+                default:
+                    throw runtime_error("Invalid escape sequence \\" + string(1, esc) +
+                        " (line " + to_string(line) + ")");
             }
+        } else {
+            cleanValue.push_back(advance()); // keep normal characters
         }
-        int contentStartCol = startCol + 1;
-        Token strTok = makeToken(TokenType::T_STRINGLIT, content, contentStartCol);
-        pendingTokens.push_back(strTok);
-        
-        int rightQuoteCol = col;
-        advance();
-        Token rightQuotes = makeToken(TokenType::T_QUOTES, "\"", rightQuoteCol);
-        pendingTokens.push_back(rightQuotes);
     }
+
+    int contentStartCol = startCol + 1;
+    pendingTokens.push_back(makeToken(TokenType::T_STRINGLIT, cleanValue, contentStartCol));
+
+    int rightQuoteCol = col;
+    advance(); // consume closing quote
+    pendingTokens.push_back(makeToken(TokenType::T_QUOTES, "\"", rightQuoteCol));
+}
+
 
     Token scanOperatorOrPunct() {
         int startCol = col;
@@ -291,8 +297,8 @@ private:
 
     Token nextToken() {
         if (!pendingTokens.empty()) {
-            Token t = pendingTokens.front(); 
-            pendingTokens.pop_front(); 
+            Token t = pendingTokens.front();
+            pendingTokens.pop_front();
             return t;
         }
 
@@ -320,10 +326,13 @@ private:
 
 int main() {
     try {
-        string code = R"( int main()
-        { int a = 2;
-         string name = "Abdullah";
-        })";
+        string code = R"(
+        int main() {
+            int a = 12.;      
+            string name = "Abdullah\nzahid";  // escape preserved
+            string bad = "abc\t"; // should throw invalid escape
+        }
+        )";
 
         Lexer lex(code);
         auto tokens = lex.tokenize();
