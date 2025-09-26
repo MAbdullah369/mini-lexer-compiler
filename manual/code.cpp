@@ -9,7 +9,7 @@ enum class TokenType {
     T_IDENTIFIER, T_INTLIT, T_FLOATLIT, T_STRINGLIT,
     T_QUOTES,
     T_LINECOMMENT, T_BLOCKCOMMENT,
-    T_PARENL, T_PARENR, T_BRACEL, T_BRACER, T_BRACKETL, T_BRACKETR, T_COMMA, T_SEMICOLON,
+    T_PARENL, T_PARENR, T_BRACEL, T_BRACER, T_BRACKETL, T_BRACKETR, T_DOT, T_COMMA, T_SEMICOLON,
     T_ASSIGNOP, T_EQUALSOP, T_NOTEQUAL, T_LESS, T_LESSEQ, T_GREATER, T_GREATEREQ,
     T_PLUS, T_MINUS, T_MULTIPLY, T_DIVIDE,
     T_AND, T_OR, T_NOT,
@@ -48,6 +48,7 @@ static string tokenTypeName(TokenType t) {
         case TokenType::T_BRACER: return "T_BRACER";
         case TokenType::T_BRACKETL: return "T_BRACKETL";
         case TokenType::T_BRACKETR: return "T_BRACKETR";
+        case TokenType::T_DOT: return "T_DOT";
         case TokenType::T_COMMA: return "T_COMMA";
         case TokenType::T_SEMICOLON: return "T_SEMICOLON";
         case TokenType::T_ASSIGNOP: return "T_ASSIGNOP";
@@ -193,28 +194,44 @@ private:
         int startCol = col;
         string digits;
         bool isFloat = false;
+        bool dotSeen = false;
 
-        while (isdigit((unsigned char)peek())) digits.push_back(advance());
-
-        if (peek() == '.') {
+        // integer part (if any)
+        while (isdigit((unsigned char)peek())) {
             digits.push_back(advance());
-            if (!isdigit((unsigned char)peek())) {
-                throw runtime_error("Lex error (line " + to_string(line) +
-                    ", col " + to_string(startCol) + "): invalid float literal '" + digits + "'");
-            }
-            isFloat = true;
-            while (isdigit((unsigned char)peek())) digits.push_back(advance());
         }
 
+        // fractional part
+        if (peek() == '.') {
+            dotSeen = true;
+            digits.push_back(advance());
+            isFloat = true;
+
+            // allow trailing dot (12.)
+            while (isdigit((unsigned char)peek())) {
+                digits.push_back(advance());
+            }
+        }
+
+        // ❌ if another dot appears => invalid float
+        if (peek() == '.') {
+            throw runtime_error("Lex error (line " + to_string(line) +
+                ", col " + to_string(startCol) +
+                "): multiple dots in number literal '" + digits + "'");
+        }
+
+        // check for identifiers starting with digit
         if (isIdentStart((unsigned char)peek())) {
             string tail;
             while (isIdentPart((unsigned char)peek())) tail.push_back(advance());
             throw runtime_error("Lex error (line " + to_string(line) +
-                ", col " + to_string(startCol) + "): invalid identifier starting with digit: '" + digits + tail + "'");
+                ", col " + to_string(startCol) +
+                "): invalid identifier starting with digit: '" + digits + tail + "'");
         }
 
         return makeToken(isFloat ? TokenType::T_FLOATLIT : TokenType::T_INTLIT, digits, startCol);
     }
+
 
     void scanStringLiteral_emitting_quotes() {
     int startCol = col;
@@ -260,6 +277,14 @@ private:
         char c = advance();
         char n = peek();
         switch (c) {
+            case '.':
+                if (n == '.') {
+                // use startCol (already defined at top of function)
+                throw runtime_error("Lex error (line " + to_string(line) +
+                    ", col " + to_string(startCol) + "): invalid float literal starting with '..'");
+            }
+            return makeToken(TokenType::T_DOT, ".", startCol);                      
+
             case '=':
                 if (n == '=') { advance(); return makeToken(TokenType::T_EQUALSOP, "==", startCol); }
                 return makeToken(TokenType::T_ASSIGNOP, "=", startCol);
@@ -328,7 +353,7 @@ int main() {
     try {
         string code = R"(
         int main() {
-            int a = 12.;      
+            int a = ..12;      
             string name = "Abdullah\nzahid";  // escape preserved
             string bad = "abc\t"; // should throw invalid escape
         }
