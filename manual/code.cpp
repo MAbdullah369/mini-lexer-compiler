@@ -353,7 +353,7 @@ int main() {
     try {
         string code = R"(
         int main() {
-            int a = ..12;      
+            int a = .12;      
             string name = "Abdullah\nzahid";  // escape preserved
             string bad = "abc\t"; // should throw invalid escape
         }

@@ -6,7 +6,6 @@ enum class TokenType {
     T_FUNCTION, T_INT, T_FLOAT, T_STRING, T_BOOL, T_RETURN,
     T_IF, T_ELSE, T_WHILE, T_FOR,
     T_IDENTIFIER, T_INTLIT, T_FLOATLIT, T_STRINGLIT,
-    T_QUOTES,
     T_LINECOMMENT, T_BLOCKCOMMENT,
     T_PARENL, T_PARENR, T_BRACEL, T_BRACER, T_BRACKETL, T_BRACKETR, T_COMMA, T_SEMICOLON,
     T_ASSIGNOP, T_EQUALSOP, T_NOTEQUAL, T_LESS, T_LESSEQ, T_GREATER, T_GREATEREQ,
@@ -38,7 +37,6 @@ static string tokenTypeName(TokenType t) {
         case TokenType::T_INTLIT: return "T_INTLIT";
         case TokenType::T_FLOATLIT: return "T_FLOATLIT";
         case TokenType::T_STRINGLIT: return "T_STRINGLIT";
-        case TokenType::T_QUOTES: return "T_QUOTES";
         case TokenType::T_LINECOMMENT: return "T_LINECOMMENT";
         case TokenType::T_BLOCKCOMMENT: return "T_BLOCKCOMMENT";
         case TokenType::T_PARENL: return "T_PARENL";
@@ -94,12 +92,6 @@ public:
             Token token = nextToken();
             if (token.type != TokenType::T_UNKNOWN) {
                 tokens.push_back(token);
-                if (token.type == TokenType::T_QUOTES && !stringLiteralTokens.empty()) {
-                    for (const auto& strToken : stringLiteralTokens) {
-                        tokens.push_back(strToken);
-                    }
-                    stringLiteralTokens.clear();
-                }
             } else {
                 throw runtime_error("Unknown token at line " + to_string(line) +
                                     ", col " + to_string(col) + ": '" +
@@ -121,18 +113,19 @@ private:
           twoCharOpPattern;
 
     unordered_map<string, TokenType> keywords;
-    vector<Token> stringLiteralTokens;
 
     void initializePatterns() {
         whitespacePattern = regex(R"(^[ \t\r\n]+)");
         lineCommentPattern = regex(R"(^//([^\r\n]*))");
         blockCommentPattern = regex(R"(^/\*([\s\S]*?)\*/)", regex_constants::ECMAScript);
-        floatPattern = regex(R"(^(\d+\.\d+))");
-        badFloat1 = regex(R"(^(\d+\.(?!\d)))");   // 23.
-        badFloat2 = regex(R"(^(\.\d+))");         // .45
+        // Valid float: at least one digit before and after the dot
+        floatPattern = regex(R"(^([0-9]+\.[0-9]+))");
+        badFloat1 = regex(R"(^([0-9]+\.(?![0-9])))");   // invalid: 12.
+        badFloat2 = regex(R"(^(\.[0-9]+))");            // invalid: .45
         intPattern = regex(R"(^(\d+))");
         identifierPattern = regex(R"(^([a-zA-Z_][a-zA-Z0-9_]*))");
-        stringPattern = regex(R"(^"((?:[^"\\]|\\.)*)\")", regex_constants::ECMAScript);
+        // ✅ Fixed string regex (handles escapes + requires closing quote)
+        stringPattern = regex(R"delim(^"((?:[^"\\]|\\.)*)")delim", regex_constants::ECMAScript);
         twoCharOpPattern = regex(R"(^(==|!=|<=|>=|&&|\|\|))");
 
         keywords = {
@@ -168,13 +161,17 @@ private:
             if (str[i] == '\\' && i + 1 < str.length()) {
                 char esc = str[i + 1];
                 switch (esc) {
-                    case 'n': case 't': case 'r': case '\\': case '"': case '0':
-                        i++; // skip escape
-                        break;
+                    case 'n': result += '\n'; break;
+                    case 't': result += '\t'; break;
+                    case 'r': result += '\r'; break;
+                    case '\\': result += '\\'; break;
+                    case '"': result += '"'; break;
+                    case '0': result += '\0'; break;
                     default:
                         throw runtime_error("Invalid escape sequence \\" + string(1, esc) +
                                             " at line " + to_string(line));
                 }
+                i++; // skip escape
             } else result += str[i];
         }
         return result;
@@ -207,15 +204,8 @@ private:
         // --- string literal ---
         if (regex_search(remaining, match, stringPattern) && match.position() == 0) {
             string content = match.str(1);
-            Token leftQuote = makeToken(TokenType::T_QUOTES, "\"");
-            pos++; col++;
-            Token strToken = makeToken(TokenType::T_STRINGLIT, processEscapeSequences(content));
-            pos += content.length(); col += content.length();
-            Token rightQuote = makeToken(TokenType::T_QUOTES, "\"");
-            pos++; col++;
-            stringLiteralTokens.push_back(strToken);
-            stringLiteralTokens.push_back(rightQuote);
-            return leftQuote;
+            pos += match.length(); col += match.length();
+            return makeToken(TokenType::T_STRINGLIT, processEscapeSequences(content));
         }
         if (remaining[0] == '"') {
             throw runtime_error("Unterminated string literal (line " + to_string(line) + ")");
@@ -286,12 +276,12 @@ private:
             case ']': return makeToken(TokenType::T_BRACKETR, "]");
             case ',': return makeToken(TokenType::T_COMMA, ",");
             case ';': return makeToken(TokenType::T_SEMICOLON, ";");
-            case '"': return makeToken(TokenType::T_QUOTES, "\"");
         }
         return makeToken(TokenType::T_UNKNOWN, string(1, c));
     }
 };
 
+#ifdef LEXER_STANDALONE
 int main() {
     try {
         string code = R"(
@@ -302,8 +292,7 @@ fn int my_fn(int x, float y) {
     */
     string s = "Abdullah\nZahid";
     float a = 23.45;
-    float b = 23.5;   // invalid
-    2.45 // invalid
+    float b = 23.5;
     if (x >= 10 && y < 20.5) {
         return x + 1;
     } else {
@@ -328,3 +317,4 @@ fn int my_fn(int x, float y) {
     }
     return 0;
 }
+#endif
