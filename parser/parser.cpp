@@ -137,12 +137,14 @@ struct TokenStream {
 
     Token advance() {
         size_t idx = skipTriviaIndex(i);
+        cerr << "[DBG] TokenStream::advance() - from index " << i << " to " << idx << "\n";
         if (idx >= tokens.size()) {
             i = tokens.size();
             return Token{TokenType::T_EOF, "", 0, 0};
         }
         Token t = tokens[idx];
         i = idx + 1;
+        cerr << "[DBG] TokenStream::advance() - advanced to: " << tokenToDisplay(t) << "\n";
         return t;
     }
 
@@ -217,10 +219,12 @@ struct Parser {
             // params
             if (!ts.match(TokenType::T_PARENR)) {
                 while (true) {
-                    Token ptype = ts.peek(); if (!(ptype.type==TokenType::T_INT || ptype.type==TokenType::T_FLOAT || ptype.type==TokenType::T_STRING || ptype.type==TokenType::T_BOOL))
+                    Token ptype = ts.peek(); 
+                    if (!(ptype.type==TokenType::T_INT || ptype.type==TokenType::T_FLOAT || ptype.type==TokenType::T_STRING || ptype.type==TokenType::T_BOOL))
                         throw ParseError(ParseErrorKind::ExpectedTypeToken, ptype, "Expected parameter type");
                     ts.advance();
-                    Token pname = ts.peek(); if (pname.type != TokenType::T_IDENTIFIER) throw ParseError(ParseErrorKind::ExpectedIdentifier, pname, "Expected parameter name");
+                    Token pname = ts.peek(); 
+                    if (pname.type != TokenType::T_IDENTIFIER) throw ParseError(ParseErrorKind::ExpectedIdentifier, pname, "Expected parameter name");
                     ts.advance();
                     fn->params.push_back({ptype.type, pname.lexeme});
                     if (ts.match(TokenType::T_COMMA)) continue;
@@ -230,14 +234,28 @@ struct Parser {
             }
             // body
             if (!ts.match(TokenType::T_BRACEL)) throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' to start function body");
-            while (!ts.match(TokenType::T_BRACER)) {
-                fn->body.push_back(parseStmt());
+            
+            // CORRECTED: Parse function body statements until we find the closing brace
+            cerr << "[DBG] Starting function body parsing\n";
+            while (!ts.eof() && ts.peek().type != TokenType::T_BRACER) {
+                try {
+                    StmtPtr stmt = parseStmt();
+                    fn->body.push_back(stmt);
+                    cerr << "[DBG] Successfully parsed statement in function body\n";
+                } catch (const ParseError& e) {
+                    cerr << "[DBG] Failed to parse statement in function body: " << e.what() << "\n";
+                    throw ParseError(e.kind, e.token, "In function body: " + string(e.what()));
+                }
             }
+
+            if (!ts.match(TokenType::T_BRACER)) {
+                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '}' to end function body");
+            }
+            cerr << "[DBG] Finished function body parsing\n";
             return fn;
         }
 
-        // Otherwise variable declaration or function without 'fn'
-        // Expect type
+        // Handle standalone variable declarations (global variables)
         Token typeTok = ts.peek();
         if (!(typeTok.type==TokenType::T_INT || typeTok.type==TokenType::T_FLOAT|| typeTok.type==TokenType::T_STRING || typeTok.type==TokenType::T_BOOL)) {
             throw ParseError(ParseErrorKind::ExpectedTypeToken, typeTok, "Expected type token");
@@ -252,9 +270,12 @@ struct Parser {
             auto fn = make_shared<FnDecl>(typeTok.type, id.lexeme);
             if (!ts.match(TokenType::T_PARENR)) {
                 while (true) {
-                    Token ptype = ts.peek(); if (!(ptype.type==TokenType::T_INT || ptype.type==TokenType::T_FLOAT || ptype.type==TokenType::T_STRING || ptype.type==TokenType::T_BOOL)) throw ParseError(ParseErrorKind::ExpectedTypeToken, ptype, "Expected param type");
+                    Token ptype = ts.peek(); 
+                    if (!(ptype.type==TokenType::T_INT || ptype.type==TokenType::T_FLOAT || ptype.type==TokenType::T_STRING || ptype.type==TokenType::T_BOOL)) 
+                        throw ParseError(ParseErrorKind::ExpectedTypeToken, ptype, "Expected param type");
                     ts.advance();
-                    Token pname = ts.peek(); if (pname.type!=TokenType::T_IDENTIFIER) throw ParseError(ParseErrorKind::ExpectedIdentifier, pname, "Expected param name");
+                    Token pname = ts.peek(); 
+                    if (pname.type!=TokenType::T_IDENTIFIER) throw ParseError(ParseErrorKind::ExpectedIdentifier, pname, "Expected param name");
                     ts.advance();
                     fn->params.push_back({ptype.type, pname.lexeme});
                     if (ts.match(TokenType::T_COMMA)) continue;
@@ -263,8 +284,19 @@ struct Parser {
                 }
             }
             if (!ts.match(TokenType::T_BRACEL)) throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' for function body");
-            while (!ts.match(TokenType::T_BRACER)) {
-                fn->body.push_back(parseStmt());
+            
+            // CORRECTED: Parse function body statements
+            while (!ts.eof() && ts.peek().type != TokenType::T_BRACER) {
+                try {
+                    StmtPtr stmt = parseStmt();
+                    fn->body.push_back(stmt);
+                } catch (const ParseError& e) {
+                    throw ParseError(e.kind, e.token, "In function body: " + string(e.what()));
+                }
+            }
+            
+            if (!ts.match(TokenType::T_BRACER)) {
+                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '}' to end function body");
             }
             return fn;
         } else {
@@ -281,19 +313,35 @@ struct Parser {
     // Statements
     StmtPtr parseStmt() {
         Token t = ts.peek();
-        cerr << "[DBG] parseStmt() peek -> type=" << (int)t.type << " token=" << tokenToDisplay(t)
-        << " line=" << t.line << " col=" << t.col << "\n";
+        cerr << "[DBG] parseStmt() START - type=" << (int)t.type << " token=" << tokenToDisplay(t)
+             << " line=" << t.line << " col=" << t.col << "\n";
+        
+        // Handle variable declarations
         if (t.type == TokenType::T_INT || t.type == TokenType::T_FLOAT ||
             t.type == TokenType::T_STRING || t.type == TokenType::T_BOOL) {
+            cerr << "[DBG] parseStmt() - Found variable declaration with type: " << (int)t.type << "\n";
             Token typeTok = ts.advance();
             Token name = ts.peek();
+            cerr << "[DBG] parseStmt() - Variable name: " << tokenToDisplay(name) << "\n";
+            
             if (name.type != TokenType::T_IDENTIFIER)
-            throw ParseError(ParseErrorKind::ExpectedIdentifier, name, "Expected identifier in variable declaration");
+                throw ParseError(ParseErrorKind::ExpectedIdentifier, name, "Expected identifier in variable declaration");
             ts.advance();
+            
             ExprPtr init = nullptr;
-            if (ts.match(TokenType::T_ASSIGNOP)) init = parseExpression();
+            if (ts.match(TokenType::T_ASSIGNOP)) {
+                cerr << "[DBG] parseStmt() - Found assignment, parsing expression\n";
+                init = parseExpression();
+                cerr << "[DBG] parseStmt() - Expression parsed successfully\n";
+            }
+            
+            Token next = ts.peek();
+            cerr << "[DBG] parseStmt() - Before semicolon check, next token: " << tokenToDisplay(next) << "\n";
+            
             if (!ts.match(TokenType::T_SEMICOLON))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after variable declaration");
+            
+            cerr << "[DBG] parseStmt() - Successfully parsed variable declaration\n";
             return make_shared<VarDeclStmt>(typeTok.type, name.lexeme, init);
         }
 
@@ -306,20 +354,6 @@ struct Parser {
             if (!ts.match(TokenType::T_SEMICOLON)) throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after return");
             return make_shared<ReturnStmt>(e);
         }
-
-        /*if (t.type == TokenType::T_INT || t.type == TokenType::T_FLOAT || 
-            t.type == TokenType::T_STRING || t.type == TokenType::T_BOOL) {
-            // local var decl
-            Token typeTok = ts.advance();
-            Token name = ts.peek();
-            if (name.type != TokenType::T_IDENTIFIER) 
-            throw ParseError(ParseErrorKind::ExpectedIdentifier, name, "Expected identifier in variable declaration");
-            ts.advance();
-            ExprPtr init = nullptr;
-            if (ts.match(TokenType::T_ASSIGNOP)) init = parseExpression();
-            if (!ts.match(TokenType::T_SEMICOLON)) throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after var declaration");
-            return make_shared<VarDeclStmt>(typeTok.type, name.lexeme, init);
-        }*/
 
         if (t.type == TokenType::T_IF) {
             ts.advance(); // consume if
@@ -384,6 +418,9 @@ struct Parser {
 
         // Expression statement
         ExprPtr e = parseExpression();
+        if (!e) {
+            throw ParseError(ParseErrorKind::ExpectedExpr, ts.peek(), "Expected expression");
+        }
         if (!ts.match(TokenType::T_SEMICOLON)) throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after expression");
         return make_shared<ExprStmt>(e);
     }
@@ -397,6 +434,7 @@ struct Parser {
     // ---------- Pratt parser ----------
     ExprPtr parseExpression(int minPrec = 0) {
         ExprPtr left = parsePrefix();
+        cerr << "[DBG] parseExpression() - after parsePrefix, left: " << (left ? "valid" : "null") << "\n";
         if (!left) throw ParseError(ParseErrorKind::ExpectedExpr, ts.peek(), "Expected expression");
         while (true) {
             Token op = ts.peek();
@@ -416,23 +454,28 @@ struct Parser {
 
     ExprPtr parsePrefix() {
         Token t = ts.peek();
+        cerr << "[DBG] parsePrefix() - token: " << tokenToDisplay(t) << " type: " << (int)t.type << "\n";
 
         // 🔒 Prevent treating type keywords (int, float, string, bool) as expressions
         if (t.type == TokenType::T_INT || t.type == TokenType::T_FLOAT ||
             t.type == TokenType::T_STRING || t.type == TokenType::T_BOOL) {
+            cerr << "[DBG] parsePrefix() - rejecting type keyword\n";
             return nullptr; // stop here, let parseStmt handle them as declarations
         }
 
         if (t.type == TokenType::T_INTLIT) {
             ts.advance();
+            cerr << "[DBG] parsePrefix() - parsed int literal: " << t.lexeme << "\n";
             return make_shared<IntLiteral>(t.lexeme);
         }
         if (t.type == TokenType::T_FLOATLIT) {
             ts.advance();
+            cerr << "[DBG] parsePrefix() - parsed float literal: " << t.lexeme << "\n";
             return make_shared<FloatLiteral>(t.lexeme);
         }
         if (t.type == TokenType::T_STRINGLIT) {
             ts.advance();
+            cerr << "[DBG] parsePrefix() - parsed string literal: " << t.lexeme << "\n";
             return make_shared<StringLiteral>(t.lexeme);
         }
 
@@ -477,18 +520,10 @@ struct Parser {
             return make_shared<UnaryExpr>(tokToOp(t), rhs);
         }
 
-        // 🔽 Handle string literals wrapped in quotes
-        if (t.type == TokenType::T_STRINGLIT) {
-            ts.advance();
-            return make_shared<StringLiteral>(t.lexeme);
-        }
-
-
         // Not a valid prefix expression
+        cerr << "[DBG] parsePrefix() - not a valid prefix expression\n";
         return nullptr;
     }
-
-
 
     int getBinaryPrec(TokenType t) {
         switch (t) {

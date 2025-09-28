@@ -18,9 +18,7 @@ fn int my_fn(int x, float y) {
     string s = "Abdullah\nZahid";
     float a = 23.45;
     float b = 23.5;
-    // invalid numbers below -- expected errors if uncommented
-    // float c = 12.;
-    // float d = .12;
+  
     if (x >= 10 && y < 20.5) {
         return x + 1;
     } else {
@@ -31,10 +29,11 @@ fn int my_fn(int x, float y) {
 
     try {
         // --- Lexing ---
+        cout << "==================== LEXING ====================\n";
         RegexLexer lex(code);
         auto tokens = lex.tokenize();
 
-        cout << "==================== TOKENS ====================\n[";
+        cout << "Tokens found: " << tokens.size() << "\n[";
         bool first = true;
         for (auto &t : tokens) {
             if (t.type == TokenType::T_EOF) continue;
@@ -45,17 +44,22 @@ fn int my_fn(int x, float y) {
         cout << "]\n\n";
 
         // --- Parsing ---
+        cout << "==================== PARSING ===================\n";
         Parser parser(tokens);
         Program prog = parser.parseProgram();
 
+        cout << "Parse successful! Items in program: " << prog.items.size() << "\n\n";
+        
         cout << "===================== AST =====================\n";
         prog.print(cout);
         cout << "===============================================\n";
 
     } catch (const ParseError &e) {
         cerr << "ParseError: " << e.what() << "\n";
+        return 1;
     } catch (const exception &ex) {
         cerr << "Error: " << ex.what() << "\n";
+        return 1;
     }
 
     return 0;
