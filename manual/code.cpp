@@ -118,6 +118,9 @@ private:
         {"return", TokenType::T_RETURN},
         {"if", TokenType::T_IF},
         {"else", TokenType::T_ELSE},
+        {"true", TokenType::T_BOOLLIT},
+        {"false", TokenType::T_BOOLLIT},
+
         {"while", TokenType::T_WHILE},
         {"for", TokenType::T_FOR},
     };
