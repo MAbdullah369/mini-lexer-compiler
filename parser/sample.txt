@@ -1,0 +1,15 @@
+
+
+int global_var = 10;
+int main10()
+{
+    int local1 = 1;
+    {
+        int local2 = 2;
+        {
+            int local3 = 3;
+            global_var = local1 + local2 + local3;  
+        }
+    }
+    return local1;
+}

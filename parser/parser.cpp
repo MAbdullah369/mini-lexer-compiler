@@ -968,8 +968,11 @@ struct Parser
             if (!ts.match(TokenType::T_BRACEL))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' to start function body");
             fnDepth++; // <— ENTER function body
-            // Expect '{' already consumed before this loop
+
+            // Create a SINGLE block for the entire function body
+            auto bodyBlock = make_shared<BlockStmt>();
             DBG("[DBG] Starting function body parsing");
+
             while (!ts.eof())
             {
                 // Stop on the closing brace, but DO NOT consume it here.
@@ -981,23 +984,20 @@ struct Parser
                     StmtPtr stmt = parseStmt();
                     if (stmt)
                     {
-                        fn->body.push_back(stmt);
+                        bodyBlock->stmts.push_back(stmt);  // <-- FIX: Add to the single block
                         DBG("[DBG] Successfully parsed statement in function body");
                     }
-                    else
-                    {
-                        // Make progress if parseStmt ever returns null (shouldn't)
-                        ts.advance();
-                    }
+                    // ... rest stays the same
                 }
                 catch (const ParseError &e)
                 {
                     DBG("[DBG] Failed to parse statement in function body: " << e.what());
-                    // Skip only the current bad statement, but *do not* consume the outer '}'
                     syncInBlock();
-                    // If we’re now right before '}', the loop condition above will break next iteration
                 }
             }
+
+            // Add the single block to function body
+            fn->body.push_back(bodyBlock);  // <-- FIX: Add the block, not individual statements
 
             // NOW consume the closing brace for the function
             if (!ts.match(TokenType::T_BRACER))
@@ -1006,7 +1006,6 @@ struct Parser
             }
             fnDepth--; // <— LEAVE function body
             DBG("[DBG] Finished function body parsing");
-
             return fn;
         }
 
@@ -1069,22 +1068,23 @@ struct Parser
             if (!ts.match(TokenType::T_BRACEL))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' for function body");
 
+            // Create a SINGLE block for the entire function body
+            auto bodyBlock = make_shared<BlockStmt>();
             while (!ts.eof() && ts.peek().type != TokenType::T_BRACER)
             {
                 try
                 {
                     StmtPtr stmt = parseStmt();
-                    fn->body.push_back(stmt);
+                    bodyBlock->stmts.push_back(stmt);  // <-- FIX: Add to the single block
                 }
                 catch (const ParseError &e)
                 {
-                    // previously: sync(false) or something similar
-                    syncInBlock(); // 👈 use the new smarter recovery
-
-                    // cerr << "[DBG] Failed to parse statement in function body: " << e.what() << "\n";
-                    // sync(/*consumeBracer=*/false); // <-- do NOT eat '}' here
+                    syncInBlock();
                 }
             }
+
+            // Add the single block to function body
+            fn->body.push_back(bodyBlock);  // <-- FIX: Add the block, not individual statements
 
             if (!ts.match(TokenType::T_BRACER))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '}' to end function body");
@@ -1126,16 +1126,16 @@ struct Parser
                              "Nested function definitions are not allowed");
         }
 
-        // Handle variable declarations
+       // Handle variable declarations
         if (t.type == TokenType::T_INT || t.type == TokenType::T_FLOAT ||
             t.type == TokenType::T_STRING || t.type == TokenType::T_BOOL ||
             t.type == TokenType::T_CHAR)
         {
             Token typeTok = ts.advance(); // the type keyword
 
-            // We'll collect one or more "name [= init]" items
-            auto block = make_shared<BlockStmt>();
-
+            // For single variable declaration, return VarDeclStmt directly
+            // For multiple declarations (comma-separated), return BlockStmt
+            
             // Expect first identifier
             Token name = ts.peek();
             if (name.type != TokenType::T_IDENTIFIER)
@@ -1148,30 +1148,40 @@ struct Parser
             {
                 init = parseExpression();
             }
-            block->stmts.push_back(make_shared<VarDeclStmt>(typeTok.type, name.lexeme, init));
 
-            // Parse: (, ident [= expr])*
-            while (ts.match(TokenType::T_COMMA))
-            {
-                Token n2 = ts.peek();
-                if (n2.type != TokenType::T_IDENTIFIER)
-                    throw ParseError(ParseErrorKind::ExpectedIdentifier, n2, "Expected identifier after ',' in declaration");
-                ts.advance();
+            // Check if there are more declarations (comma-separated)
+            if (ts.match(TokenType::T_COMMA)) {
+                // Multiple declarations - create a block
+                auto block = make_shared<BlockStmt>();
+                block->stmts.push_back(make_shared<VarDeclStmt>(typeTok.type, name.lexeme, init));
 
-                ExprPtr i2 = nullptr;
-                if (ts.match(TokenType::T_ASSIGNOP))
-                {
-                    i2 = parseExpression();
-                }
-                block->stmts.push_back(make_shared<VarDeclStmt>(typeTok.type, n2.lexeme, i2));
+                // Parse remaining declarations
+                do {
+                    Token n2 = ts.peek();
+                    if (n2.type != TokenType::T_IDENTIFIER)
+                        throw ParseError(ParseErrorKind::ExpectedIdentifier, n2, "Expected identifier after ',' in declaration");
+                    ts.advance();
+
+                    ExprPtr i2 = nullptr;
+                    if (ts.match(TokenType::T_ASSIGNOP))
+                    {
+                        i2 = parseExpression();
+                    }
+                    block->stmts.push_back(make_shared<VarDeclStmt>(typeTok.type, n2.lexeme, i2));
+                } while (ts.match(TokenType::T_COMMA));
+
+                // Require a single ';' to end the whole declaration list
+                if (!ts.match(TokenType::T_SEMICOLON))
+                    throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after variable declaration");
+
+                return block;
+            } else {
+                // Single declaration - return VarDeclStmt directly
+                if (!ts.match(TokenType::T_SEMICOLON))
+                    throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after variable declaration");
+
+                return make_shared<VarDeclStmt>(typeTok.type, name.lexeme, init);
             }
-
-            // Require a single ';' to end the whole declaration list
-            if (!ts.match(TokenType::T_SEMICOLON))
-                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after variable declaration");
-
-            // Return the block (even if it has only one VarDecl)
-            return block;
         }
 
         if (t.type == TokenType::T_RETURN)
