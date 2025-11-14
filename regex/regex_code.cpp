@@ -17,6 +17,7 @@ enum class TokenType
     T_WHILE,
     T_FOR,
     T_DO, // <-- add this
+    T_BREAK,
     T_IDENTIFIER,
     T_INTLIT,
     T_FLOATLIT,
@@ -49,12 +50,17 @@ enum class TokenType
     T_AND,
     T_OR,
     T_NOT,
+    T_BITAND, // &
+    T_BITOR,  // |
+    T_BITXOR, // ^
+    T_POWER,  // **
     T_EOF,
     T_PLUS_EQ,  // +=
     T_MINUS_EQ, // -=
     T_INC,      // ++
     T_DEC,      // --
     T_UNKNOWN
+
 };
 
 struct Token
@@ -94,6 +100,8 @@ static string tokenTypeName(TokenType t)
         return "T_FOR";
     case TokenType::T_DO:
         return "T_DO";
+    case TokenType::T_BREAK:
+        return "T_BREAK";
     case TokenType::T_IDENTIFIER:
         return "T_IDENTIFIER";
     case TokenType::T_INTLIT:
@@ -170,6 +178,15 @@ static string tokenTypeName(TokenType t)
         return "T_INC";
     case TokenType::T_DEC:
         return "T_DEC";
+    case TokenType::T_BITAND:
+        return "T_BITAND";
+    case TokenType::T_BITOR:
+        return "T_BITOR";
+    case TokenType::T_BITXOR:
+        return "T_BITXOR";
+    case TokenType::T_POWER:
+        return "T_POWER";
+
     default:
         return "T_UNKNOWN";
     }
@@ -275,6 +292,7 @@ private:
             {"while", TokenType::T_WHILE},
             {"for", TokenType::T_FOR},
             {"do", TokenType::T_DO},
+            {"break", TokenType::T_BREAK},
             {"char", TokenType::T_CHAR}, // <— NEW
             // ✅ ADD THESE:
             {"true", TokenType::T_BOOLLIT},
@@ -521,6 +539,13 @@ private:
                 return makeToken(TokenType::T_LSHIFT, op);
             }
         }
+        if (remaining.rfind("**", 0) == 0)
+        {
+            pos += 2;
+            col += 2;
+            return makeToken(TokenType::T_POWER, "**");
+        }
+
         // Just before single-char switch:
         if (remaining.rfind("<<", 0) == 0)
         {
@@ -570,6 +595,13 @@ private:
         col++;
         switch (c)
         {
+        case '&':
+            return makeToken(TokenType::T_BITAND, "&");
+        case '|':
+            return makeToken(TokenType::T_BITOR, "|");
+        case '^':
+            return makeToken(TokenType::T_BITXOR, "^");
+
         case '=':
             return makeToken(TokenType::T_ASSIGNOP, "=");
         case '<':

@@ -1,7 +1,5 @@
-#include <bits/stdc++.h>               // or whatever your header includes are // if you include the lexer this way
+#include <bits/stdc++.h> // or whatever your header includes are // if you include the lexer this way
 #include "debug.hpp"
-
-
 
 using namespace std;
 
@@ -28,29 +26,27 @@ static const std::unordered_map<TokenType, OperatorInfo> OP_TABLE = {
     {TokenType::T_ASSIGNOP, {1, RIGHT, "="}},
     {TokenType::T_PLUS_EQ, {1, RIGHT, "+="}},
     {TokenType::T_MINUS_EQ, {1, RIGHT, "-="}},
-
     {TokenType::T_OR, {2, LEFT, "||"}},
     {TokenType::T_AND, {3, LEFT, "&&"}},
-
     {TokenType::T_EQUALSOP, {4, LEFT, "=="}},
     {TokenType::T_NOTEQUAL, {4, LEFT, "!="}},
     {TokenType::T_LESS, {5, LEFT, "<"}},
     {TokenType::T_LESSEQ, {5, LEFT, "<="}},
     {TokenType::T_GREATER, {5, LEFT, ">"}},
     {TokenType::T_GREATEREQ, {5, LEFT, ">="}},
-
-    {TokenType::T_LSHIFT, {6, LEFT, "<<"}},
-    {TokenType::T_RSHIFT, {6, LEFT, ">>"}},
-
-    {TokenType::T_PLUS, {7, LEFT, "+"}},
-    {TokenType::T_MINUS, {7, LEFT, "-"}},
-
-    {TokenType::T_MULTIPLY, {8, LEFT, "*"}},
-    {TokenType::T_DIVIDE, {8, LEFT, "/"}},
-
-    {TokenType::T_NOT, {9, RIGHT, "!"}},   // unary
-    {TokenType::T_INC, {10, RIGHT, "++"}}, // prefix/postfix
-    {TokenType::T_DEC, {10, RIGHT, "--"}}};
+    {TokenType::T_BITOR, {6, LEFT, "|"}},
+    {TokenType::T_BITXOR, {7, LEFT, "^"}},
+    {TokenType::T_BITAND, {8, LEFT, "&"}},
+    {TokenType::T_LSHIFT, {9, LEFT, "<<"}},
+    {TokenType::T_RSHIFT, {9, LEFT, ">>"}},
+    {TokenType::T_PLUS, {10, LEFT, "+"}},
+    {TokenType::T_MINUS, {10, LEFT, "-"}},
+    {TokenType::T_MULTIPLY, {11, LEFT, "*"}},
+    {TokenType::T_DIVIDE, {11, LEFT, "/"}},
+    {TokenType::T_POWER, {12, RIGHT, "**"}},
+    {TokenType::T_NOT, {13, RIGHT, "!"}},
+    {TokenType::T_INC, {14, RIGHT, "++"}},
+    {TokenType::T_DEC, {14, RIGHT, "--"}}}; // <-- THIS closes the table!
 
 // Helper to convert type tokens to readable names
 static const char *typeKeywordToString(TokenType t)
@@ -118,6 +114,10 @@ enum class TokenType
     T_OR,
     T_NOT,
     T_EOF,
+    T_BITAND, // &
+    T_BITOR,  // |
+    T_BITXOR, // ^
+    T_POWER,  // **
     T_UNKNOWN
 };
 
@@ -222,54 +222,78 @@ static void indent(ostream &os, int n)
 
 struct ASTNode
 {
+    int line, col;
+    ASTNode(int l = 0, int c = 0) : line(l), col(c) {}
     virtual ~ASTNode() = default;
-    virtual void print(ostream &os, int indent_level = 0) const = 0;
+    virtual void print(ostream &os, int indent = 0) const = 0;
 };
 
 struct Expr : ASTNode
 {
+    Expr(int l = 0, int c = 0) : ASTNode(l, c) {}
+    virtual ~Expr() = default;
+    // no extra methods unless you want
 };
 using ExprPtr = shared_ptr<Expr>;
+
+inline std::string indentStr(int indent)
+{
+    return std::string(indent, ' ');
+}
 
 struct IntLiteral : Expr
 {
     string val;
-    IntLiteral(string v) : val(move(v)) {}
+    IntLiteral(string v, int l = 0, int c = 0) : val(move(v))
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Int(" << val << ")\n";
+        os << "Int(" << val << ") [l:" << line << " c:" << col << "]\n";
     }
 };
 struct FloatLiteral : Expr
 {
     string val;
-    FloatLiteral(string v) : val(move(v)) {}
+    FloatLiteral(string v, int l = 0, int c = 0) : val(move(v))
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Float(" << val << ")\n";
+        os << "Float(" << val << ") [l:" << line << " c:" << col << "]\n";
     }
 };
 struct StringLiteral : Expr
 {
     string val;
-    StringLiteral(string v) : val(move(v)) {}
+    StringLiteral(string v, int l = 0, int c = 0) : val(move(v))
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "String(\"" << val << "\")\n";
+        os << "String(\"" << val << "\") [l:" << line << " c:" << col << "]\n";
     }
 };
-
 struct CharLiteral : Expr
 {
-    string val; // store the 1-char decoded string
-    explicit CharLiteral(string v) : val(std::move(v)) {}
+    string val;
+    explicit CharLiteral(string v, int l = 0, int c = 0) : val(std::move(v))
+    {
+        line = l;
+        col = c;
+    }
     void print(std::ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        // pretty print common escapes
         string shown = val;
         if (val == "\n")
             shown = "\\n";
@@ -281,52 +305,67 @@ struct CharLiteral : Expr
             shown = "\\\\";
         else if (val == "'")
             shown = "\\'";
-        os << "Char('" << shown << "')\n";
+        os << "Char('" << shown << "') [l:" << line << " c:" << col << "]\n";
     }
 };
 struct BoolLiteral : Expr
 {
     bool val;
-    explicit BoolLiteral(bool v) : val(v) {}
+    explicit BoolLiteral(bool v, int l = 0, int c = 0) : val(v)
+    {
+        line = l;
+        col = c;
+    }
     void print(std::ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Bool(" << (val ? "true" : "false") << ")\n";
+        os << "Bool(" << (val ? "true" : "false") << ") [l:" << line << " c:" << col << "]\n";
     }
 };
 
 struct IdentifierExpr : Expr
 {
     string name;
-    IdentifierExpr(string n) : name(move(n)) {}
+    IdentifierExpr(string n, int l = 0, int c = 0) : name(move(n))
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Ident(" << name << ")\n";
+        os << "Ident(" << name << ") [l:" << line << " c:" << col << "]\n";
     }
 };
 struct UnaryExpr : Expr
 {
     string op;
     ExprPtr rhs;
-    UnaryExpr(string o, ExprPtr r) : op(move(o)), rhs(r) {}
+    UnaryExpr(string o, ExprPtr r, int l = 0, int c = 0) : op(move(o)), rhs(r)
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Unary(" << op << ")\n";
+        os << "Unary(" << op << ") [l:" << line << " c:" << col << "]\n";
         rhs->print(os, ind + 1);
     }
 };
-
 struct PostfixExpr : Expr
 {
-    string op; // "++" or "--"
+    string op;
     ExprPtr expr;
-    PostfixExpr(string o, ExprPtr e) : op(std::move(o)), expr(std::move(e)) {}
+    PostfixExpr(string o, ExprPtr e, int l = 0, int c = 0) : op(std::move(o)), expr(std::move(e))
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Postfix(" << op << ")\n";
+        os << "Postfix(" << op << ") [l:" << line << " c:" << col << "]\n";
         expr->print(os, ind + 1);
     }
 };
@@ -334,11 +373,15 @@ struct BinaryExpr : Expr
 {
     string op;
     ExprPtr lhs, rhs;
-    BinaryExpr(string o, ExprPtr l, ExprPtr r) : op(move(o)), lhs(l), rhs(r) {}
+    BinaryExpr(string o, ExprPtr l, ExprPtr r, int ln = 0, int c = 0) : op(move(o)), lhs(l), rhs(r)
+    {
+        line = ln;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Binary(" << op << ")\n";
+        os << "Binary(" << op << ") [l:" << line << " c:" << col << "]\n";
         lhs->print(os, ind + 1);
         rhs->print(os, ind + 1);
     }
@@ -347,53 +390,80 @@ struct CallExpr : Expr
 {
     string name;
     vector<ExprPtr> args;
-    CallExpr(string n, vector<ExprPtr> a) : name(move(n)), args(move(a)) {}
+    CallExpr(string n, vector<ExprPtr> a, int l = 0, int c = 0) : name(move(n)), args(move(a))
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Call(" << name << ")\n";
+        os << "Call(" << name << ") [l:" << line << " c:" << col << "]\n";
         for (auto &a : args)
             a->print(os, ind + 1);
     }
 };
-
 struct IndexExpr : Expr
 {
     ExprPtr base;
     ExprPtr index;
-    IndexExpr(ExprPtr b, ExprPtr i) : base(std::move(b)), index(std::move(i)) {}
+    IndexExpr(ExprPtr b, ExprPtr i, int l = 0, int c = 0) : base(std::move(b)), index(std::move(i))
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "IndexExpr\n";
+        os << "IndexExpr [l:" << line << " c:" << col << "]\n";
         base->print(os, ind + 1);
         index->print(os, ind + 1);
     }
 };
 
-// Statements / declarations
+// ------ Statements / Declarations -----
 struct Stmt : ASTNode
 {
+    Stmt(int l = 0, int c = 0) : ASTNode(l, c) {}
+    virtual ~Stmt() = default;
 };
+
 using StmtPtr = shared_ptr<Stmt>;
 
-struct EmptyStmt : Stmt
+struct BreakStmt : Stmt
 {
-    void print(std::ostream &os, int ind = 0) const override
+    BreakStmt(int l, int c) : Stmt(l, c) {}
+    void print(ostream &os, int ind = 0) const override
     {
-        indent(os, ind);
-        os << "EmptyStmt\n";
+        os << indentStr(ind) << "Break [l:" << line << " c:" << col << "]\n";
     }
 };
 
+struct EmptyStmt : Stmt
+{
+    EmptyStmt(int l = 0, int c = 0)
+    {
+        line = l;
+        col = c;
+    }
+    void print(std::ostream &os, int ind = 0) const override
+    {
+        indent(os, ind);
+        os << "EmptyStmt [l:" << line << " c:" << col << "]\n";
+    }
+};
 struct ExprStmt : Stmt
 {
     ExprPtr expr;
-    ExprStmt(ExprPtr e) : expr(e) {}
+    ExprStmt(ExprPtr e, int l = 0, int c = 0) : expr(e)
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "ExprStmt\n";
+        os << "ExprStmt [l:" << line << " c:" << col << "]\n";
         if (expr)
             expr->print(os, ind + 1);
     }
@@ -401,11 +471,15 @@ struct ExprStmt : Stmt
 struct ReturnStmt : Stmt
 {
     ExprPtr expr;
-    ReturnStmt(ExprPtr e) : expr(e) {}
+    ReturnStmt(ExprPtr e, int l = 0, int c = 0) : expr(e)
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Return\n";
+        os << "Return [l:" << line << " c:" << col << "]\n";
         if (expr)
             expr->print(os, ind + 1);
     }
@@ -415,12 +489,15 @@ struct VarDeclStmt : Stmt
     TokenType typeTok;
     string name;
     ExprPtr init;
-    VarDeclStmt(TokenType t, string n, ExprPtr i) : typeTok(t), name(move(n)), init(i) {}
+    VarDeclStmt(TokenType t, string n, ExprPtr i, int l = 0, int c = 0) : typeTok(t), name(move(n)), init(i)
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "VarDecl(type=" << typeKeywordToString(typeTok) << " name=" << name << ")\n";
-
+        os << "VarDecl(type=" << typeKeywordToString(typeTok) << " name=" << name << ") [l:" << line << " c:" << col << "]\n";
         if (init)
             init->print(os, ind + 1);
     }
@@ -428,10 +505,15 @@ struct VarDeclStmt : Stmt
 struct BlockStmt : Stmt
 {
     vector<StmtPtr> stmts;
+    BlockStmt(int l = 0, int c = 0)
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Block\n";
+        os << "Block [l:" << line << " c:" << col << "]\n";
         for (auto &s : stmts)
             s->print(os, ind + 1);
     }
@@ -441,11 +523,15 @@ struct IfStmt : Stmt
     ExprPtr cond;
     StmtPtr thenStmt;
     StmtPtr elseStmt;
-    IfStmt(ExprPtr c, StmtPtr t, StmtPtr e = nullptr) : cond(c), thenStmt(t), elseStmt(e) {}
+    IfStmt(ExprPtr c, StmtPtr t, StmtPtr e = nullptr, int l = 0, int col_ = 0) : cond(c), thenStmt(t), elseStmt(e)
+    {
+        line = l;
+        col = col_;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "If\n";
+        os << "If [l:" << line << " c:" << col << "]\n";
         cond->print(os, ind + 1);
         indent(os, ind + 1);
         os << "Then:\n";
@@ -462,28 +548,32 @@ struct WhileStmt : Stmt
 {
     ExprPtr cond;
     StmtPtr body;
-    WhileStmt(ExprPtr c, StmtPtr b) : cond(c), body(b) {}
+    WhileStmt(ExprPtr c, StmtPtr b, int l = 0, int col_ = 0) : cond(c), body(b)
+    {
+        line = l;
+        col = col_;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "While\n";
+        os << "While [l:" << line << " c:" << col << "]\n";
         cond->print(os, ind + 1);
         body->print(os, ind + 1);
     }
 };
-
-// --- NEW: DoWhileStmt ---
 struct DoWhileStmt : Stmt
 {
     StmtPtr body;
     ExprPtr cond;
-
-    DoWhileStmt(StmtPtr b, ExprPtr c) : body(std::move(b)), cond(std::move(c)) {}
-
+    DoWhileStmt(StmtPtr b, ExprPtr c, int l = 0, int col_ = 0) : body(std::move(b)), cond(std::move(c))
+    {
+        line = l;
+        col = col_;
+    }
     void print(std::ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "DoWhile\n";
+        os << "DoWhile [l:" << line << " c:" << col << "]\n";
         indent(os, ind + 1);
         os << "Body:\n";
         body->print(os, ind + 2);
@@ -498,11 +588,15 @@ struct ForStmt : Stmt
     ExprPtr cond;
     ExprPtr post;
     StmtPtr body;
-    ForStmt(ExprPtr i, ExprPtr c, ExprPtr p, StmtPtr b) : init(i), cond(c), post(p), body(b) {}
+    ForStmt(ExprPtr i, ExprPtr c, ExprPtr p, StmtPtr b, int l = 0, int c_ = 0) : init(i), cond(c), post(p), body(b)
+    {
+        line = l;
+        col = c_;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "For\n";
+        os << "For [l:" << line << " c:" << col << "]\n";
         if (init)
         {
             indent(os, ind + 1);
@@ -533,11 +627,16 @@ struct FnDecl : ASTNode
     string name;
     vector<pair<TokenType, string>> params;
     vector<StmtPtr> body;
-    FnDecl(TokenType rt, string n) : returnType(rt), name(move(n)) {}
+    FnDecl(TokenType rt, string n, int l = 0, int c = 0) : returnType(rt), name(move(n))
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "FnDecl(name=" << name << " type=" << typeKeywordToString(returnType) << ")\n";
+        os << "FnDecl(name=" << name << " type=" << typeKeywordToString(returnType)
+           << ") [l:" << line << " c:" << col << "]\n";
         indent(os, ind + 1);
         os << "Params:\n";
         for (auto &p : params)
@@ -555,10 +654,15 @@ struct FnDecl : ASTNode
 struct Program : ASTNode
 {
     vector<shared_ptr<ASTNode>> items;
+    Program(int l = 0, int c = 0)
+    {
+        line = l;
+        col = c;
+    }
     void print(ostream &os, int ind = 0) const override
     {
         indent(os, ind);
-        os << "Program\n";
+        os << "Program [l:" << line << " c:" << col << "]\n";
         for (auto &it : items)
             it->print(os, ind + 1);
     }
@@ -576,15 +680,12 @@ struct TokenStream
     {
         return tt == TokenType::T_LINECOMMENT || tt == TokenType::T_BLOCKCOMMENT;
     }
-
-    // return index of first non-trivia token at or after idx
     size_t skipTriviaIndex(size_t idx) const
     {
         while (idx < tokens.size() && isTrivia(tokens[idx].type))
             idx++;
         return idx;
     }
-
     Token peek() const
     {
         size_t idx = skipTriviaIndex(i);
@@ -592,12 +693,10 @@ struct TokenStream
             return tokens[idx];
         return Token{TokenType::T_EOF, "", 0, 0};
     }
-
     Token advance()
     {
         size_t idx = skipTriviaIndex(i);
         DBG("[DBG] TokenStream::advance() - from index " << i << " to " << idx);
-
         if (idx >= tokens.size())
         {
             i = tokens.size();
@@ -608,7 +707,6 @@ struct TokenStream
         DBG("[DBG] TokenStream::advance() - advanced to: " << tokenToDisplay(t));
         return t;
     }
-
     bool match(TokenType t)
     {
         if (peek().type == t)
@@ -618,7 +716,6 @@ struct TokenStream
         }
         return false;
     }
-
     bool eof() const { return skipTriviaIndex(i) >= tokens.size() || tokens[skipTriviaIndex(i)].type == TokenType::T_EOF; }
 };
 
@@ -879,18 +976,13 @@ struct Parser
     {
         Token first = ts.peek();
 
-        // ------------------------------------------------------------------
-        // Case 1: starts with 'fn'  →  fn <type> <ident>(params){...}
-        // ------------------------------------------------------------------
+        // ----------- Case 1: 'fn' keyword -----------
         if (first.type == TokenType::T_FUNCTION)
         {
             ts.advance(); // consume 'fn'
 
-            // Peek what comes after 'fn'
             Token rt = ts.peek();
 
-            // If the next token is IDENT *and* then '('  → classic "missing return type"
-            // e.g. `fn add(x, y) { ... }`  (should be: `fn int add(x, y) { ... }`)
             {
                 size_t afterRtIdx = ts.skipTriviaIndex(ts.i + 1);
                 Token afterRt = (afterRtIdx < ts.tokens.size())
@@ -906,7 +998,6 @@ struct Parser
                 }
             }
 
-            // Normal path: require a proper type token
             if (!(rt.type == TokenType::T_INT ||
                   rt.type == TokenType::T_FLOAT ||
                   rt.type == TokenType::T_STRING ||
@@ -920,19 +1011,17 @@ struct Parser
             }
             ts.advance(); // consume return type
 
-            // Function name
             Token id = ts.peek();
             if (id.type != TokenType::T_IDENTIFIER)
                 throw ParseError(ParseErrorKind::ExpectedIdentifier, id, "Expected function name after return type");
             ts.advance(); // consume identifier
 
-            // '('
             if (!ts.match(TokenType::T_PARENL))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '(' after function name");
 
-            auto fn = make_shared<FnDecl>(rt.type, id.lexeme);
+            // Provide line/col for the FnDecl
+            auto fn = make_shared<FnDecl>(rt.type, id.lexeme, first.line, first.col);
 
-            // Params (optional)
             if (!ts.match(TokenType::T_PARENR))
             {
                 while (true)
@@ -964,18 +1053,17 @@ struct Parser
                 }
             }
 
-            // '{' body
             if (!ts.match(TokenType::T_BRACEL))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' to start function body");
-            fnDepth++; // <— ENTER function body
+            fnDepth++;
 
-            // Create a SINGLE block for the entire function body
-            auto bodyBlock = make_shared<BlockStmt>();
+            // Carry source position to the block as well
+            auto bodyBlock = make_shared<BlockStmt>(ts.peek().line, ts.peek().col);
+
             DBG("[DBG] Starting function body parsing");
 
             while (!ts.eof())
             {
-                // Stop on the closing brace, but DO NOT consume it here.
                 if (ts.peek().type == TokenType::T_BRACER)
                     break;
 
@@ -984,10 +1072,9 @@ struct Parser
                     StmtPtr stmt = parseStmt();
                     if (stmt)
                     {
-                        bodyBlock->stmts.push_back(stmt);  // <-- FIX: Add to the single block
+                        bodyBlock->stmts.push_back(stmt);
                         DBG("[DBG] Successfully parsed statement in function body");
                     }
-                    // ... rest stays the same
                 }
                 catch (const ParseError &e)
                 {
@@ -996,23 +1083,18 @@ struct Parser
                 }
             }
 
-            // Add the single block to function body
-            fn->body.push_back(bodyBlock);  // <-- FIX: Add the block, not individual statements
+            fn->body.push_back(bodyBlock);
 
-            // NOW consume the closing brace for the function
             if (!ts.match(TokenType::T_BRACER))
             {
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '}' to end function body");
             }
-            fnDepth--; // <— LEAVE function body
+            fnDepth--;
             DBG("[DBG] Finished function body parsing");
             return fn;
         }
 
-        // ------------------------------------------------------------------
-        // Case 2: top-level variable or function (without 'fn' keyword)
-        //         <type> <ident> ( ... ) { ... }   or   <type> <ident> [= expr] ;
-        // ------------------------------------------------------------------
+        // ----------- Case 2: Top-level var or function -----------
         Token typeTok = ts.peek();
         if (!(typeTok.type == TokenType::T_INT ||
               typeTok.type == TokenType::T_FLOAT ||
@@ -1029,10 +1111,10 @@ struct Parser
             throw ParseError(ParseErrorKind::ExpectedIdentifier, id, "Expected identifier");
         ts.advance(); // consume identifier
 
-        // Function style if next is '('
+        // Function form: <type> <ident>(...) { ... }
         if (ts.match(TokenType::T_PARENL))
         {
-            auto fn = make_shared<FnDecl>(typeTok.type, id.lexeme);
+            auto fn = make_shared<FnDecl>(typeTok.type, id.lexeme, typeTok.line, typeTok.col);
 
             if (!ts.match(TokenType::T_PARENR))
             {
@@ -1068,14 +1150,13 @@ struct Parser
             if (!ts.match(TokenType::T_BRACEL))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' for function body");
 
-            // Create a SINGLE block for the entire function body
-            auto bodyBlock = make_shared<BlockStmt>();
+            auto bodyBlock = make_shared<BlockStmt>(ts.peek().line, ts.peek().col);
             while (!ts.eof() && ts.peek().type != TokenType::T_BRACER)
             {
                 try
                 {
                     StmtPtr stmt = parseStmt();
-                    bodyBlock->stmts.push_back(stmt);  // <-- FIX: Add to the single block
+                    bodyBlock->stmts.push_back(stmt);
                 }
                 catch (const ParseError &e)
                 {
@@ -1083,8 +1164,7 @@ struct Parser
                 }
             }
 
-            // Add the single block to function body
-            fn->body.push_back(bodyBlock);  // <-- FIX: Add the block, not individual statements
+            fn->body.push_back(bodyBlock);
 
             if (!ts.match(TokenType::T_BRACER))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '}' to end function body");
@@ -1093,7 +1173,6 @@ struct Parser
         }
         else
         {
-            // Top-level variable declaration
             ExprPtr init = nullptr;
             if (ts.match(TokenType::T_ASSIGNOP))
             {
@@ -1102,7 +1181,7 @@ struct Parser
             if (!ts.match(TokenType::T_SEMICOLON))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after variable declaration");
 
-            return make_shared<VarDeclStmt>(typeTok.type, id.lexeme, init);
+            return make_shared<VarDeclStmt>(typeTok.type, id.lexeme, init, typeTok.line, typeTok.col);
         }
     }
 
@@ -1114,29 +1193,25 @@ struct Parser
                                               << " line=" << t.line << " col=" << t.col);
 
         // Empty statement: just a semicolon
-        if (ts.peek().type == TokenType::T_SEMICOLON)
+        if (t.type == TokenType::T_SEMICOLON)
         {
             ts.advance();
-            return make_shared<EmptyStmt>();
+            return make_shared<EmptyStmt>(t.line, t.col);
         }
         // 🚫 No nested function definitions
-        if (ts.peek().type == TokenType::T_FUNCTION)
+        if (t.type == TokenType::T_FUNCTION)
         {
-            throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(),
-                             "Nested function definitions are not allowed");
+            throw ParseError(ParseErrorKind::UnexpectedToken, t, "Nested function definitions are not allowed");
         }
 
-       // Handle variable declarations
+        // Variable declarations (single or comma-list)
         if (t.type == TokenType::T_INT || t.type == TokenType::T_FLOAT ||
             t.type == TokenType::T_STRING || t.type == TokenType::T_BOOL ||
             t.type == TokenType::T_CHAR)
         {
-            Token typeTok = ts.advance(); // the type keyword
+            Token typeTok = ts.advance(); // type keyword
 
-            // For single variable declaration, return VarDeclStmt directly
-            // For multiple declarations (comma-separated), return BlockStmt
-            
-            // Expect first identifier
+            // First identifier
             Token name = ts.peek();
             if (name.type != TokenType::T_IDENTIFIER)
                 throw ParseError(ParseErrorKind::ExpectedIdentifier, name, "Expected identifier in variable declaration");
@@ -1149,41 +1224,42 @@ struct Parser
                 init = parseExpression();
             }
 
-            // Check if there are more declarations (comma-separated)
-            if (ts.match(TokenType::T_COMMA)) {
-                // Multiple declarations - create a block
-                auto block = make_shared<BlockStmt>();
-                block->stmts.push_back(make_shared<VarDeclStmt>(typeTok.type, name.lexeme, init));
-
-                // Parse remaining declarations
-                do {
+            if (ts.match(TokenType::T_COMMA))
+            {
+                // Multiple declarations - block containing individual VarDeclStmts
+                auto block = make_shared<BlockStmt>(typeTok.line, typeTok.col);
+                block->stmts.push_back(
+                    make_shared<VarDeclStmt>(typeTok.type, name.lexeme, init, name.line, name.col));
+                do
+                {
                     Token n2 = ts.peek();
                     if (n2.type != TokenType::T_IDENTIFIER)
                         throw ParseError(ParseErrorKind::ExpectedIdentifier, n2, "Expected identifier after ',' in declaration");
                     ts.advance();
-
                     ExprPtr i2 = nullptr;
                     if (ts.match(TokenType::T_ASSIGNOP))
                     {
                         i2 = parseExpression();
                     }
-                    block->stmts.push_back(make_shared<VarDeclStmt>(typeTok.type, n2.lexeme, i2));
+                    block->stmts.push_back(
+                        make_shared<VarDeclStmt>(typeTok.type, n2.lexeme, i2, n2.line, n2.col));
                 } while (ts.match(TokenType::T_COMMA));
 
-                // Require a single ';' to end the whole declaration list
                 if (!ts.match(TokenType::T_SEMICOLON))
                     throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after variable declaration");
 
                 return block;
-            } else {
-                // Single declaration - return VarDeclStmt directly
+            }
+            else
+            {
                 if (!ts.match(TokenType::T_SEMICOLON))
                     throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after variable declaration");
 
-                return make_shared<VarDeclStmt>(typeTok.type, name.lexeme, init);
+                return make_shared<VarDeclStmt>(typeTok.type, name.lexeme, init, name.line, name.col);
             }
         }
 
+        // Return statement
         if (t.type == TokenType::T_RETURN)
         {
             if (fnDepth == 0)
@@ -1198,7 +1274,7 @@ struct Parser
             }
             if (!ts.match(TokenType::T_SEMICOLON))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after return");
-            return make_shared<ReturnStmt>(e);
+            return make_shared<ReturnStmt>(e, t.line, t.col);
         }
 
         if (t.type == TokenType::T_IF)
@@ -1208,6 +1284,7 @@ struct Parser
 
         if (t.type == TokenType::T_WHILE)
         {
+            Token whileTok = ts.peek();
             ts.advance(); // consume 'while'
 
             if (!ts.match(TokenType::T_PARENL))
@@ -1220,57 +1297,47 @@ struct Parser
             if (!ts.match(TokenType::T_PARENR))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ')' after while condition");
 
-            // Allow both {block} and single stmt
             StmtPtr body = parseStmtOrBlock();
             if (!body)
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected statement or block after while");
 
-            return make_shared<WhileStmt>(cond, body);
+            return make_shared<WhileStmt>(cond, body, whileTok.line, whileTok.col);
         }
 
         if (t.type == TokenType::T_DO)
         {
+            Token doTok = ts.peek();
             ts.advance(); // consume 'do'
 
-            // Body can be either a block {...} or a single statement
             StmtPtr body = parseStmtOrBlock();
 
-            // Expect 'while'
             if (ts.peek().type != TokenType::T_WHILE)
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected 'while' after 'do' body");
             ts.advance(); // consume 'while'
 
-            // Expect '('
             if (!ts.match(TokenType::T_PARENL))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '(' after 'while'");
 
-            // Parse condition
             ExprPtr cond = parseExpression();
-
-            // Expect ')'
             if (!ts.match(TokenType::T_PARENR))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ')' after condition");
-
-            // Expect ';'
             if (!ts.match(TokenType::T_SEMICOLON))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after do-while");
 
-            return make_shared<DoWhileStmt>(body, cond);
+            return make_shared<DoWhileStmt>(body, cond, doTok.line, doTok.col);
         }
 
         if (t.type == TokenType::T_FOR)
         {
+            Token forTok = ts.peek();
             ts.advance();
             if (!ts.match(TokenType::T_PARENL))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '(' after 'for'");
-            // init (optional)
             ExprPtr init = nullptr, cond = nullptr, post = nullptr;
             if (ts.peek().type != TokenType::T_SEMICOLON)
             {
-                // allow var decl or expression
                 if (ts.peek().type == TokenType::T_INT || ts.peek().type == TokenType::T_FLOAT || ts.peek().type == TokenType::T_STRING || ts.peek().type == TokenType::T_BOOL)
                 {
-                    // parse var decl inside for - we will convert to expression by ignoring type
                     Token typeTok = ts.advance();
                     Token name = ts.peek();
                     if (name.type != TokenType::T_IDENTIFIER)
@@ -1297,20 +1364,37 @@ struct Parser
             if (!ts.match(TokenType::T_PARENR))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ')' to close for loop header");
             StmtPtr body = parseStmtOrBlock();
-            return make_shared<ForStmt>(init, cond, post, body);
+            return make_shared<ForStmt>(init, cond, post, body, forTok.line, forTok.col);
+        }
+
+        if (t.type == TokenType::T_BREAK)
+        {
+            ts.advance();
+            if (!ts.match(TokenType::T_SEMICOLON))
+                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after break");
+            return make_shared<BreakStmt>(t.line, t.col);
         }
 
         if (t.type == TokenType::T_BRACEL)
         {
-            // block
+            Token blockTok = ts.peek();
             ts.advance(); // consume '{'
-            auto block = make_shared<BlockStmt>();
-            while (!ts.match(TokenType::T_BRACER))
+            auto block = make_shared<BlockStmt>(blockTok.line, blockTok.col);
+            while (true)
             {
-                // handle possible EOF
                 if (ts.eof())
                     throw ParseError(ParseErrorKind::UnexpectedEOF, ts.peek(), "Unterminated block");
-                block->stmts.push_back(parseStmt());
+
+                Token next = ts.peek();
+                if (next.type == TokenType::T_BRACER)
+                {
+                    ts.advance(); // consume '}'
+                    break;
+                }
+
+                StmtPtr s = parseStmt();
+                if (s)
+                    block->stmts.push_back(s);
             }
             return block;
         }
@@ -1323,7 +1407,7 @@ struct Parser
         }
         if (!ts.match(TokenType::T_SEMICOLON))
             throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after expression");
-        return make_shared<ExprStmt>(e);
+        return make_shared<ExprStmt>(e, t.line, t.col);
     }
 
     StmtPtr parseStmtOrBlock()
@@ -1333,9 +1417,10 @@ struct Parser
             return parseStmt(); // parseStmt handles block
         return parseStmt();
     }
+
     StmtPtr parseIf()
     {
-        // assumes current token is T_IF
+        Token ifTok = ts.peek();
         ts.advance(); // consume 'if'
         if (!ts.match(TokenType::T_PARENL))
             throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '(' after 'if'");
@@ -1348,7 +1433,6 @@ struct Parser
         StmtPtr elseStmt = nullptr;
         if (ts.match(TokenType::T_ELSE))
         {
-            // If the next token is 'if', parse an else-if by recursion:
             if (ts.peek().type == TokenType::T_IF)
             {
                 elseStmt = parseIf();
@@ -1359,7 +1443,7 @@ struct Parser
             }
         }
 
-        return make_shared<IfStmt>(cond, thenStmt, elseStmt);
+        return make_shared<IfStmt>(cond, thenStmt, elseStmt, ifTok.line, ifTok.col);
     }
 
     // ---------- Pratt parser ----------
@@ -1379,86 +1463,22 @@ struct Parser
 
             Token opTok = ts.advance();
             int nextMin = prec + (isRightAssoc(opTok.type) ? 0 : 1);
-
             ExprPtr right = parseExpression(nextMin);
 
             // Handle compound assignment desugaring: x += y → x = x + y
             if (opTok.type == TokenType::T_PLUS_EQ || opTok.type == TokenType::T_MINUS_EQ)
             {
                 const std::string bop = (opTok.type == TokenType::T_PLUS_EQ) ? "+" : "-";
-                auto combined = std::make_shared<BinaryExpr>(bop, left, right);
-                left = std::make_shared<BinaryExpr>("=", left, combined);
+                auto combined = std::make_shared<BinaryExpr>(bop, left, right, opTok.line, opTok.col);
+                left = std::make_shared<BinaryExpr>("=", left, combined, opTok.line, opTok.col);
                 continue;
             }
 
-            left = std::make_shared<BinaryExpr>(tokToOp(opTok), left, right);
+            left = std::make_shared<BinaryExpr>(tokToOp(opTok), left, right, opTok.line, opTok.col);
         }
 
         return left;
     }
-
-    // ExprPtr parseExpression(int minPrec = 0)
-    // {
-    //     ExprPtr left = parsePrefix();
-    //     DBG("[DBG] parseExpression() - after parsePrefix, left: " << (left ? "valid" : "null"));
-    //     if (!left)
-    //         throw ParseError(ParseErrorKind::ExpectedExpr, ts.peek(), "Expected expression");
-
-    //     while (true)
-    //     {
-    //         Token op = ts.peek();
-    //         int prec = getBinaryPrec(op.type);
-
-    //         // Stop if not an operator or precedence is too low for this context
-    //         if (prec == PREC_NONE || prec < minPrec)
-    //             break;
-
-    //         Token opTok = ts.advance();
-
-    //         // ===== Assignment & compound assignment (right-associative) =====
-    //         if (opTok.type == TokenType::T_ASSIGNOP ||
-    //             opTok.type == TokenType::T_PLUS_EQ ||
-    //             opTok.type == TokenType::T_MINUS_EQ)
-    //         {
-    //             // ✅ LHS must be assignable: identifier OR array element (e.g., arr[i])
-    //             if (!isAssignableLHS(left))
-    //             {
-    //                 throw ParseError(ParseErrorKind::UnexpectedToken, opTok,
-    //                                  "Left-hand side of assignment must be assignable (identifier or index)");
-    //             }
-
-    //             // Right-associative: use SAME precedence (no +1)
-    //             int nextMin = prec;
-    //             ExprPtr right = parseExpression(nextMin);
-
-    //             if (opTok.type == TokenType::T_ASSIGNOP)
-    //             {
-    //                 // x = rhs
-    //                 left = make_shared<BinaryExpr>("=", left, right);
-    //             }
-    //             else
-    //             {
-    //                 // x += y  =>  x = x + y
-    //                 // x -= y  =>  x = x - y
-    //                 const string bop = (opTok.type == TokenType::T_PLUS_EQ) ? "+" : "-";
-    //                 auto combined = make_shared<BinaryExpr>(bop, left, right);
-    //                 left = make_shared<BinaryExpr>("=", left, combined);
-    //             }
-
-    //             // Continue Pratt loop with the new 'left'
-    //             continue;
-    //         }
-
-    //         // ===== Normal left-associative binary operators =====
-    //         // For left-assoc ops: nextMin = prec + 1
-    //         // For right-assoc ops (if you add more later): nextMin = prec
-    //         int nextMin = prec + (isRightAssoc(opTok.type) ? 0 : 1);
-    //         ExprPtr right = parseExpression(nextMin);
-    //         left = make_shared<BinaryExpr>(tokToOp(opTok), left, right);
-    //     }
-
-    //     return left;
-    // }
 
     ExprPtr parsePostfixTrail(ExprPtr left)
     {
@@ -1469,6 +1489,7 @@ struct Parser
             // function call: foo(...), also supports zero args foo()
             if (t.type == TokenType::T_PARENL)
             {
+                int callLine = t.line, callCol = t.col;
                 ts.advance(); // '('
                 vector<ExprPtr> args;
                 if (!ts.match(TokenType::T_PARENR))
@@ -1485,33 +1506,34 @@ struct Parser
                                          "Expected ',' or ')' in argument list");
                     }
                 }
-
                 string fnName;
                 if (auto id = dynamic_pointer_cast<IdentifierExpr>(left))
                     fnName = id->name;
                 else
                     fnName = "<unknown_fn>";
 
-                left = make_shared<CallExpr>(fnName, args);
+                left = make_shared<CallExpr>(fnName, args, callLine, callCol);
                 continue;
             }
 
             // array indexing: arr[expr]
             if (t.type == TokenType::T_BRACKETL)
             {
+                int idxLine = t.line, idxCol = t.col;
                 ts.advance(); // '['
                 ExprPtr idx = parseExpression();
                 if (!ts.match(TokenType::T_BRACKETR))
                     throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ']' after index expression");
-                left = make_shared<IndexExpr>(left, idx);
+                left = make_shared<IndexExpr>(left, idx, idxLine, idxCol);
                 continue;
             }
 
             // postfix ++ / --
             if (t.type == TokenType::T_INC || t.type == TokenType::T_DEC)
             {
+                int postLine = t.line, postCol = t.col;
                 ts.advance();
-                left = make_shared<PostfixExpr>(tokToOp(t), left);
+                left = make_shared<PostfixExpr>(tokToOp(t), left, postLine, postCol);
                 continue;
             }
 
@@ -1525,11 +1547,10 @@ struct Parser
         Token t = ts.peek();
         DBG("[DBG] parsePrefix() - token: " << tokenToDisplay(t) << " type: " << (int)t.type);
 
-        // 🔒 Prevent treating type keywords (int, float, string, bool) as expressions
+        // 🔒 Prevent treating type keywords (int, float, string, bool, char) as expressions
         if (t.type == TokenType::T_INT || t.type == TokenType::T_FLOAT ||
             t.type == TokenType::T_STRING || t.type == TokenType::T_BOOL ||
             t.type == TokenType::T_CHAR) // <— add this
-
         {
             DBG("[DBG] parsePrefix() - rejecting type keyword");
             return nullptr; // let parseStmt handle declarations
@@ -1539,25 +1560,25 @@ struct Parser
         if (t.type == TokenType::T_INTLIT)
         {
             ts.advance();
-            auto node = make_shared<IntLiteral>(t.lexeme);
+            auto node = make_shared<IntLiteral>(t.lexeme, t.line, t.col);
             return parsePostfixTrail(node);
         }
         if (t.type == TokenType::T_FLOATLIT)
         {
             ts.advance();
-            auto node = make_shared<FloatLiteral>(t.lexeme);
+            auto node = make_shared<FloatLiteral>(t.lexeme, t.line, t.col);
             return parsePostfixTrail(node);
         }
         if (t.type == TokenType::T_STRINGLIT)
         {
             ts.advance();
-            auto node = make_shared<StringLiteral>(t.lexeme);
+            auto node = make_shared<StringLiteral>(t.lexeme, t.line, t.col);
             return parsePostfixTrail(node);
         }
         if (t.type == TokenType::T_CHARLIT)
         {
             ts.advance();
-            auto node = make_shared<CharLiteral>(t.lexeme);
+            auto node = make_shared<CharLiteral>(t.lexeme, t.line, t.col);
             return parsePostfixTrail(node);
         }
 
@@ -1565,7 +1586,7 @@ struct Parser
         {
             ts.advance();
             bool val = (t.lexeme == "true");
-            auto node = make_shared<BoolLiteral>(val);
+            auto node = make_shared<BoolLiteral>(val, t.line, t.col);
             return parsePostfixTrail(node);
         }
 
@@ -1573,11 +1594,12 @@ struct Parser
         if (t.type == TokenType::T_IDENTIFIER)
         {
             ts.advance();
-            auto id = make_shared<IdentifierExpr>(t.lexeme);
+            auto id = make_shared<IdentifierExpr>(t.lexeme, t.line, t.col);
 
             // ✅ function call detection
             if (ts.match(TokenType::T_PARENL))
             {
+                int callLine = t.line, callCol = t.col;
                 vector<ExprPtr> args;
                 if (!ts.match(TokenType::T_PARENR))
                 {
@@ -1592,16 +1614,16 @@ struct Parser
                         throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ',' or ')'");
                     }
                 }
-                auto call = make_shared<CallExpr>(t.lexeme, args);
+                auto call = make_shared<CallExpr>(t.lexeme, args, callLine, callCol);
                 return parsePostfixTrail(call);
             }
-
             return parsePostfixTrail(id);
         }
 
         // ---------- Parenthesized expressions ----------
         if (t.type == TokenType::T_PARENL)
         {
+            int parenLine = t.line, parenCol = t.col;
             ts.advance();
             ExprPtr inside = parseExpression();
             if (!inside)
@@ -1610,6 +1632,7 @@ struct Parser
             if (!ts.match(TokenType::T_PARENR))
                 throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(),
                                  "Expected ')'");
+            // Parentheses don't need special AST node, just preserve child
             return parsePostfixTrail(inside);
         }
 
@@ -1618,55 +1641,19 @@ struct Parser
             t.type == TokenType::T_INC || t.type == TokenType::T_DEC ||
             t.type == TokenType::T_PLUS)
         {
+            int unLine = t.line, unCol = t.col;
             ts.advance();
             ExprPtr rhs = parseExpression(PREC_UNARY);
             if (!rhs)
                 throw ParseError(ParseErrorKind::ExpectedExpr, ts.peek(),
                                  "Expected expression after unary operator");
-            return make_shared<UnaryExpr>(tokToOp(t), rhs);
+            return make_shared<UnaryExpr>(tokToOp(t), rhs, unLine, unCol);
         }
 
         DBG("[DBG] parsePrefix() - not a valid prefix expression");
         return nullptr;
     }
 
-    // int getBinaryPrec(TokenType t)
-    // {
-    //     switch (t)
-    //     {
-
-    //     case TokenType::T_PLUS_EQ:
-    //     case TokenType::T_MINUS_EQ:
-    //         return PREC_ASSIGN;
-    //     case TokenType::T_OR:
-    //         return PREC_OR;
-    //     case TokenType::T_AND:
-    //         return PREC_AND;
-    //     case TokenType::T_EQUALSOP:
-    //     case TokenType::T_NOTEQUAL:
-    //         return PREC_EQUALITY;
-    //     case TokenType::T_LESS:
-    //     case TokenType::T_LESSEQ:
-    //     case TokenType::T_GREATER:
-    //     case TokenType::T_GREATEREQ:
-    //         return PREC_COMPARISON;
-    //     case TokenType::T_PLUS:
-    //     case TokenType::T_MINUS:
-    //         return PREC_TERM;
-    //     case TokenType::T_MULTIPLY:
-    //     case TokenType::T_DIVIDE:
-    //         return PREC_FACTOR;
-    //     // ...
-    //     case TokenType::T_LSHIFT:
-    //     case TokenType::T_RSHIFT:
-    //         return PREC_SHIFT; // << >>   <-- FIX/NEW
-    //         // ...
-    //     case TokenType::T_ASSIGNOP:
-    //         return PREC_ASSIGN; // lowest
-    //     default:
-    //         return PREC_NONE;
-    //     }
-    // }
     static int getPrecedence(TokenType t)
     {
         auto it = OP_TABLE.find(t);
@@ -1678,9 +1665,4 @@ struct Parser
         auto it = OP_TABLE.find(t);
         return (it != OP_TABLE.end() && it->second.assoc == RIGHT);
     }
-
-    // bool isRightAssoc(TokenType t)
-    // {
-    //     return t == TokenType::T_ASSIGNOP || t == TokenType::T_PLUS_EQ || t == TokenType::T_MINUS_EQ;
-    // }
 };

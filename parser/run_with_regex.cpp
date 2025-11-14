@@ -9,6 +9,8 @@
 
 int main()
 {
+    cout << "RUNNING main()" << endl;
+
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 

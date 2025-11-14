@@ -3,17 +3,54 @@
 #include <bits/stdc++.h>
 using namespace std;
 
-enum class TokenType {
-    T_FUNCTION, T_INT, T_FLOAT, T_STRING, T_BOOL, T_RETURN,
-    T_IF, T_ELSE, T_WHILE, T_FOR,
-    T_IDENTIFIER, T_INTLIT, T_FLOATLIT, T_STRINGLIT,
+enum class TokenType
+{
+    T_FUNCTION,
+    T_INT,
+    T_FLOAT,
+    T_STRING,
+    T_BOOL,
+    T_RETURN,
+    T_IF,
+    T_ELSE,
+    T_WHILE,
+    T_FOR,
+    T_IDENTIFIER,
+    T_INTLIT,
+    T_FLOATLIT,
+    T_STRINGLIT,
     T_QUOTES,
-    T_LINECOMMENT, T_BLOCKCOMMENT,
-    T_PARENL, T_PARENR, T_BRACEL, T_BRACER, T_BRACKETL, T_BRACKETR, T_DOT, T_COMMA, T_SEMICOLON,
-    T_ASSIGNOP, T_EQUALSOP, T_NOTEQUAL, T_LESS, T_LESSEQ, T_GREATER, T_GREATEREQ,
-    T_PLUS, T_MINUS, T_MULTIPLY, T_DIVIDE,
-    T_AND, T_OR, T_NOT,
-    T_EOF, T_UNKNOWN
+    T_LINECOMMENT,
+    T_BLOCKCOMMENT,
+    T_PARENL,
+    T_PARENR,
+    T_BRACEL,
+    T_BRACER,
+    T_BRACKETL,
+    T_BRACKETR,
+    T_DOT,
+    T_COMMA,
+    T_SEMICOLON,
+    T_ASSIGNOP,
+    T_EQUALSOP,
+    T_NOTEQUAL,
+    T_LESS,
+    T_LESSEQ,
+    T_GREATER,
+    T_GREATEREQ,
+    T_PLUS,
+    T_MINUS,
+    T_MULTIPLY,
+    T_DIVIDE,
+    T_AND,
+    T_OR,
+    T_NOT,
+    T_BITAND, // &
+    T_BITOR,  // |
+    T_BITXOR, // ^
+    T_POWER,  // **
+    T_EOF,
+    T_UNKNOWN
 };
 
 struct Token {
@@ -66,6 +103,15 @@ static string tokenTypeName(TokenType t) {
         case TokenType::T_OR: return "T_OR";
         case TokenType::T_NOT: return "T_NOT";
         case TokenType::T_EOF: return "T_EOF";
+        case TokenType::T_BITAND:
+            return "T_BITAND";
+        case TokenType::T_BITOR:
+            return "T_BITOR";
+        case TokenType::T_BITXOR:
+            return "T_BITXOR";
+        case TokenType::T_POWER:
+            return "T_POWER";
+
         default: return "T_UNKNOWN";
     }
 }
