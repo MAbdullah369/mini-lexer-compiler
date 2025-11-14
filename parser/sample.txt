@@ -1,15 +1,23 @@
+int x = 1;
+int x = 2;
+string y = 1;
 
+int foo(int a, bool flag) { return a; }
+int bad1() { return "hi"; }
+int bad2() { int x=1; }
 
-int global_var = 10;
-int main10()
-{
-    int local1 = 1;
-    {
-        int local2 = 2;
-        {
-            int local3 = 3;
-            global_var = local1 + local2 + local3;  
-        }
-    }
-    return local1;
+int main() {
+    int v = foo(1, true, 5);
+    int u = foo("oops", false);
+    int a = "not_an_int";
+    bool b = 2;
+    if (42) { }
+    while (3) { }
+    for (;1;) { }
+    int addwrong = 1 + true;
+    int shwrong = "x" << 2;
+    int bitwrong = 2.2 & true;
+    bool boolwrong = 5 && "y";
+    int expwrong = 2 ** "foo";
+    break;
 }
