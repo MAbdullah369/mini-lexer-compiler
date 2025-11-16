@@ -249,16 +249,49 @@ private:
             paramNames[pr.second] = true;
         }
 
-        // Recursively look for a return statement anywhere in function's body
+        // SIMPLIFIED: Just check if ANY statement in the function body contains a return
         bool foundReturn = false;
         for (auto &stmt : fn->body)
         {
             if (containsReturn(stmt))
+            {
                 foundReturn = true;
+                break; // No need to check further once we find one
+            }
+        }
+
+        // Also check the function body directly for return statements
+        // This handles the case where return is at the top level of the function
+        for (auto &stmt : fn->body)
+        {
+            if (dynamic_pointer_cast<ReturnStmt>(stmt))
+            {
+                foundReturn = true;
+                break;
+            }
+        }
+
+        if (fn->returnType != TokenType::T_UNKNOWN && !foundReturn)
+        {
+            // Special case: main function might not need a return (depending on your language spec)
+            if (fn->name == "main" && fn->returnType == TokenType::T_INT)
+            {
+                // Many languages allow main to implicitly return 0
+                // If you want to be strict, keep the error; if lenient, comment this out
+                // errors.emplace_back(TypeChkError::ReturnStmtNotFound, fn->line, fn->col, "Function 'main' missing return statement");
+            }
+            else
+            {
+                errors.emplace_back(TypeChkError::ReturnStmtNotFound, fn->line, fn->col, "Function '" + fn->name + "' missing return statement");
+            }
+        }
+
+        // Still need to type-check all statements
+        for (auto &stmt : fn->body)
+        {
             checkStmt(stmt, fn->returnType);
         }
-        if (fn->returnType != TokenType::T_UNKNOWN && !foundReturn)
-            errors.emplace_back(TypeChkError::ReturnStmtNotFound, fn->line, fn->col, "Function '" + fn->name + "' missing return statement");
+
         popScope();
         functionDepth--;
     }

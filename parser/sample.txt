@@ -2,7 +2,7 @@ int x = 1;
 int x = 2;
 string y = 1;
 
-int foo(int a, bool flag) { return a; }
+int foo(int a, bool flag) {  }
 int bad1() { return "hi"; }
 int bad2() { int x=1; }
 
