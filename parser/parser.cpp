@@ -975,131 +975,118 @@ struct Parser
     shared_ptr<ASTNode> parseTopLevelDecl()
     {
         Token first = ts.peek();
+        // Helper counter for unnamed parameters (e.g., "int foo(int)")
+        static int dummyCounter = 0;
 
-        // ----------- Case 1: 'fn' keyword -----------
+        // ----------- Case 1: 'fn' keyword (e.g. "fn int main()") -----------
         if (first.type == TokenType::T_FUNCTION)
         {
             ts.advance(); // consume 'fn'
 
             Token rt = ts.peek();
-
-            {
-                size_t afterRtIdx = ts.skipTriviaIndex(ts.i + 1);
-                Token afterRt = (afterRtIdx < ts.tokens.size())
-                                    ? ts.tokens[afterRtIdx]
-                                    : Token{TokenType::T_EOF, "", 0, 0};
-
-                if (rt.type == TokenType::T_IDENTIFIER && afterRt.type == TokenType::T_PARENL)
-                {
-                    throw ParseError(
-                        ParseErrorKind::ExpectedTypeToken,
-                        rt,
-                        "Missing return type after 'fn' (e.g., 'fn int name(...)')");
-                }
-            }
-
-            if (!(rt.type == TokenType::T_INT ||
-                  rt.type == TokenType::T_FLOAT ||
-                  rt.type == TokenType::T_STRING ||
-                  rt.type == TokenType::T_BOOL ||
+            // Verify return type
+            if (!(rt.type == TokenType::T_INT || rt.type == TokenType::T_FLOAT ||
+                  rt.type == TokenType::T_STRING || rt.type == TokenType::T_BOOL ||
                   rt.type == TokenType::T_CHAR))
             {
-                throw ParseError(
-                    ParseErrorKind::ExpectedTypeToken,
-                    rt,
-                    "Expected return type after 'fn' (e.g., 'fn int name(...)')");
+                // Check for specific common error: missing return type
+                size_t afterRtIdx = ts.skipTriviaIndex(ts.i + 1);
+                Token afterRt = (afterRtIdx < ts.tokens.size()) ? ts.tokens[afterRtIdx] : Token{TokenType::T_EOF, "", 0, 0};
+                if (rt.type == TokenType::T_IDENTIFIER && afterRt.type == TokenType::T_PARENL)
+                {
+                    throw ParseError(ParseErrorKind::ExpectedTypeToken, rt, "Missing return type after 'fn'");
+                }
+                throw ParseError(ParseErrorKind::ExpectedTypeToken, rt, "Expected return type after 'fn'");
             }
             ts.advance(); // consume return type
 
             Token id = ts.peek();
             if (id.type != TokenType::T_IDENTIFIER)
-                throw ParseError(ParseErrorKind::ExpectedIdentifier, id, "Expected function name after return type");
+                throw ParseError(ParseErrorKind::ExpectedIdentifier, id, "Expected function name");
             ts.advance(); // consume identifier
 
             if (!ts.match(TokenType::T_PARENL))
-                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '(' after function name");
+                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '('");
 
-            // Provide line/col for the FnDecl
             auto fn = make_shared<FnDecl>(rt.type, id.lexeme, first.line, first.col);
 
+            // Parse Parameters
             if (!ts.match(TokenType::T_PARENR))
             {
                 while (true)
                 {
                     Token ptype = ts.peek();
-                    if (!(ptype.type == TokenType::T_INT ||
-                          ptype.type == TokenType::T_FLOAT ||
-                          ptype.type == TokenType::T_STRING ||
-                          ptype.type == TokenType::T_BOOL ||
+                    if (!(ptype.type == TokenType::T_INT || ptype.type == TokenType::T_FLOAT ||
+                          ptype.type == TokenType::T_STRING || ptype.type == TokenType::T_BOOL ||
                           ptype.type == TokenType::T_CHAR))
                     {
                         throw ParseError(ParseErrorKind::ExpectedTypeToken, ptype, "Expected parameter type");
                     }
-                    ts.advance(); // consume parameter type
+                    ts.advance(); // consume type
 
+                    // FIX 1: Handle Unnamed Parameters
+                    string paramName;
                     Token pname = ts.peek();
-                    if (pname.type != TokenType::T_IDENTIFIER)
-                        throw ParseError(ParseErrorKind::ExpectedIdentifier, pname, "Expected parameter name");
-                    ts.advance(); // consume parameter name
-
-                    fn->params.push_back({ptype.type, pname.lexeme});
+                    if (pname.type == TokenType::T_IDENTIFIER)
+                    {
+                        paramName = pname.lexeme;
+                        ts.advance();
+                    }
+                    else
+                    {
+                        // Generate dummy name if missing so AST is valid
+                        paramName = "_arg_" + to_string(dummyCounter++);
+                    }
+                    fn->params.push_back({ptype.type, paramName});
 
                     if (ts.match(TokenType::T_COMMA))
                         continue;
                     if (ts.match(TokenType::T_PARENR))
                         break;
-
-                    throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ',' or ')' in parameter list");
+                    throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ',' or ')'");
                 }
             }
 
+            // FIX 2: Handle Prototype (semicolon)
+            if (ts.match(TokenType::T_SEMICOLON))
+            {
+                return fn;
+            }
+
             if (!ts.match(TokenType::T_BRACEL))
-                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' to start function body");
+                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' or ';'");
+
+            // Parse Body
             fnDepth++;
-
-            // Carry source position to the block as well
             auto bodyBlock = make_shared<BlockStmt>(ts.peek().line, ts.peek().col);
-
-            DBG("[DBG] Starting function body parsing");
-
             while (!ts.eof())
             {
                 if (ts.peek().type == TokenType::T_BRACER)
                     break;
-
                 try
                 {
                     StmtPtr stmt = parseStmt();
                     if (stmt)
-                    {
                         bodyBlock->stmts.push_back(stmt);
-                        DBG("[DBG] Successfully parsed statement in function body");
-                    }
                 }
                 catch (const ParseError &e)
                 {
-                    DBG("[DBG] Failed to parse statement in function body: " << e.what());
                     syncInBlock();
                 }
             }
-
             fn->body.push_back(bodyBlock);
 
             if (!ts.match(TokenType::T_BRACER))
-            {
-                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '}' to end function body");
-            }
+                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '}'");
+
             fnDepth--;
-            DBG("[DBG] Finished function body parsing");
             return fn;
         }
 
-        // ----------- Case 2: Top-level var or function -----------
+        // ----------- Case 2: C-Style Declaration (e.g. "int foo(...)") -----------
         Token typeTok = ts.peek();
-        if (!(typeTok.type == TokenType::T_INT ||
-              typeTok.type == TokenType::T_FLOAT ||
-              typeTok.type == TokenType::T_STRING ||
-              typeTok.type == TokenType::T_BOOL ||
+        if (!(typeTok.type == TokenType::T_INT || typeTok.type == TokenType::T_FLOAT ||
+              typeTok.type == TokenType::T_STRING || typeTok.type == TokenType::T_BOOL ||
               typeTok.type == TokenType::T_CHAR))
         {
             throw ParseError(ParseErrorKind::ExpectedTypeToken, typeTok, "Expected type token");
@@ -1111,75 +1098,88 @@ struct Parser
             throw ParseError(ParseErrorKind::ExpectedIdentifier, id, "Expected identifier");
         ts.advance(); // consume identifier
 
-        // Function form: <type> <ident>(...) { ... }
+        // Check if it is a Function: has '('
         if (ts.match(TokenType::T_PARENL))
         {
             auto fn = make_shared<FnDecl>(typeTok.type, id.lexeme, typeTok.line, typeTok.col);
 
+            // Parse Parameters
             if (!ts.match(TokenType::T_PARENR))
             {
                 while (true)
                 {
                     Token ptype = ts.peek();
-                    if (!(ptype.type == TokenType::T_INT ||
-                          ptype.type == TokenType::T_FLOAT ||
-                          ptype.type == TokenType::T_STRING ||
-                          ptype.type == TokenType::T_BOOL ||
+                    if (!(ptype.type == TokenType::T_INT || ptype.type == TokenType::T_FLOAT ||
+                          ptype.type == TokenType::T_STRING || ptype.type == TokenType::T_BOOL ||
                           ptype.type == TokenType::T_CHAR))
                     {
                         throw ParseError(ParseErrorKind::ExpectedTypeToken, ptype, "Expected param type");
                     }
-                    ts.advance(); // consume param type
+                    ts.advance();
 
+                    // FIX 1: Handle Unnamed Parameters
+                    string paramName;
                     Token pname = ts.peek();
-                    if (pname.type != TokenType::T_IDENTIFIER)
-                        throw ParseError(ParseErrorKind::ExpectedIdentifier, pname, "Expected param name");
-                    ts.advance(); // consume param name
-
-                    fn->params.push_back({ptype.type, pname.lexeme});
+                    if (pname.type == TokenType::T_IDENTIFIER)
+                    {
+                        paramName = pname.lexeme;
+                        ts.advance();
+                    }
+                    else
+                    {
+                        paramName = "_arg_" + to_string(dummyCounter++);
+                    }
+                    fn->params.push_back({ptype.type, paramName});
 
                     if (ts.match(TokenType::T_COMMA))
                         continue;
                     if (ts.match(TokenType::T_PARENR))
                         break;
-
                     throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ',' or ')'");
                 }
             }
 
-            if (!ts.match(TokenType::T_BRACEL))
-                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' for function body");
+            // FIX 2: Handle Prototype (semicolon)
+            if (ts.match(TokenType::T_SEMICOLON))
+            {
+                return fn;
+            }
 
+            if (!ts.match(TokenType::T_BRACEL))
+                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '{' or ';'");
+
+            fnDepth++;
             auto bodyBlock = make_shared<BlockStmt>(ts.peek().line, ts.peek().col);
             while (!ts.eof() && ts.peek().type != TokenType::T_BRACER)
             {
                 try
                 {
                     StmtPtr stmt = parseStmt();
-                    bodyBlock->stmts.push_back(stmt);
+                    if (stmt)
+                        bodyBlock->stmts.push_back(stmt);
                 }
                 catch (const ParseError &e)
                 {
                     syncInBlock();
                 }
             }
-
             fn->body.push_back(bodyBlock);
 
             if (!ts.match(TokenType::T_BRACER))
-                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '}' to end function body");
-
+                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected '}'");
+            fnDepth--;
             return fn;
         }
         else
         {
+            // It is a Variable Declaration
             ExprPtr init = nullptr;
             if (ts.match(TokenType::T_ASSIGNOP))
             {
                 init = parseExpression();
             }
             if (!ts.match(TokenType::T_SEMICOLON))
-                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';' after variable declaration");
+                throw ParseError(ParseErrorKind::UnexpectedToken, ts.peek(), "Expected ';'");
 
             return make_shared<VarDeclStmt>(typeTok.type, id.lexeme, init, typeTok.line, typeTok.col);
         }

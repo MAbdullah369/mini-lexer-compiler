@@ -1,23 +1,53 @@
-int x = 1;
-int x = 2;
-string y = 1;
+// 1. Global Variable Redefinition
+int g_var = 10;
+int g_var = 20;           // Error: VariableRedefinition
 
-int foo(int a, bool flag) { return a; }
-int bad1() { return "hi"; }
-int bad2() { int x=1; }
+// 2. Function Redefinition (Prototype vs Definition conflict handled, but Double Definition is Error)
+int defined_twice(int a) { return a; }
+int defined_twice(int a) { return a; } // Error: FunctionPrototypeRedefinition
+
+// 3. Use Before Declare (Self-Initialization)
+// 'z' is used in its own initializer before it exists in the scope.
+int test_init() {
+    int z = z + 1; 
+    IF(){
+      INT  Z
+      Z
+    }       // Error: UndeclaredVariableAccessed (RHS evaluated first)
+    return z;
+}
+
+// 4. Parameter Redefinition (Strict Edge Case)
+// Trying to redeclare a parameter 'x' immediately inside the function body.
+// Standard C allows this if wrapped in a new block { int x; }, but 
+// strictly speaking, the top-level body shares scope with params.
+int param_redef(int x) {
+    int x = 5;            // Error: VariableRedefinition
+    return x;
+}
+
+// 5. Shadowing Warning (Valid C, but flagged by strict checkers)
+// The inner 'g_var' hides the global 'g_var'.
+int shadowing_test() {
+    int g_var = 50;       // Warning/Error: ShadowingDetected (if enabled)
+    return g_var;
+}
+
+// 6. Scope Leakage & Break placement
+int control_flow() {
+    if (true) {
+        int leaked = 100;
+    }
+    // 'leaked' should die after the if-block closes.
+    int y = leaked;       // Error: UndeclaredVariableAccessed
+
+    // Break is only allowed inside loops (while/for/do).
+    break;                // Error: BreakOutsideLoop
+    return 0;
+}
 
 int main() {
-    int v = foo(1, true, 5);
-    int u = foo("oops", false);
-    int a = "not_an_int";
-    bool b = 2;
-    if (42) { }
-    while (3) { }
-    for (;1;) { }
-    int addwrong = 1 + true;
-    int shwrong = "x" << 2;
-    int bitwrong = 2.2 & true;
-    bool boolwrong = 5 && "y";
-    int expwrong = 2 ** "foo";
-    break;
+    // 7. Calling Undefined Function
+    missing_function();   // Error: UndefinedFunctionCalled
+    return 0;
 }
